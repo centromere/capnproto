@@ -84,6 +84,8 @@ set(capnp-rpc_sources
   dynamic-capability.c++
   rpc.c++
   rpc.capnp.c++
+  rpc-noise.c++
+  rpc-noise.capnp.c++
   rpc-twoparty.c++
   rpc-twoparty.capnp.c++
   persistent.capnp.c++
@@ -91,13 +93,16 @@ set(capnp-rpc_sources
 set(capnp-rpc_headers
   rpc-prelude.h
   rpc.h
+  rpc-noise.h
   rpc-twoparty.h
   rpc.capnp.h
+  rpc-noise.capnp.h
   rpc-twoparty.capnp.h
   persistent.capnp.h
 )
 set(capnp-rpc_schemas
   rpc.capnp
+  rpc-noise.capnp
   rpc-twoparty.capnp
   persistent.capnp
 )
