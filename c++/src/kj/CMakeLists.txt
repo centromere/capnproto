@@ -186,6 +186,7 @@ if(NOT CAPNP_LITE)
 endif()
 
 # kj-tls ======================================================================
+
 if(WITH_OPENSSL)
   set(kj-tls_sources
     compat/readiness-io.c++
@@ -209,6 +210,32 @@ if(WITH_OPENSSL)
     install(FILES ${kj-tls_headers} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kj/compat")
   endif()
 endif()
+
+# kj-noise ======================================================================
+
+if(WITH_NOISE)
+  set(kj-noise
+    compat/noise.c++
+  )
+  set(kj-noise_headers
+    compat/noise.h
+  )
+  if(NOT CAPNP_LITE)
+    add_library(kj-noise ${kj-noise})
+    add_library(CapnProto::kj-noise ALIAS kj-noise)
+    target_link_libraries(kj-noise PUBLIC kj-async)
+
+    target_include_directories(kj-noise PRIVATE /usr/local/noise/include)
+
+    target_compile_definitions(kj-noise PRIVATE KJ_HAS_NOISE)
+    target_link_libraries(kj-noise PRIVATE /usr/local/noise/lib/libnoiseprotocol.a)
+
+    set_target_properties(kj-noise PROPERTIES VERSION ${VERSION})
+    install(TARGETS kj-noise ${INSTALL_TARGETS_DEFAULT_ARGS})
+    install(FILES ${kj-noise_headers} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kj/compat")
+  endif()
+endif()
+
 
 # kj-gzip ======================================================================
 

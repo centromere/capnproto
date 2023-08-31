@@ -46,6 +46,10 @@ set(WITH_OPENSSL "AUTO" CACHE STRING
 # define list of values GUI will offer for the variable
 set_property(CACHE WITH_OPENSSL PROPERTY STRINGS AUTO ON OFF)
 
+set(WITH_NOISE "AUTO" CACHE STRING
+  "Whether or not to build libkj-noise by linking against noise-c")
+set_property(CACHE WITH_NOISE PROPERTY STRINGS AUTO ON OFF)
+
 set(WITH_ZLIB "AUTO" CACHE STRING
   "Whether or not to build libkj-gzip by linking against zlib")
 set_property(CACHE WITH_ZLIB PROPERTY STRINGS AUTO ON OFF)
@@ -66,6 +70,19 @@ elseif (WITH_OPENSSL STREQUAL "AUTO")
   endif()
 elseif (WITH_OPENSSL)
   find_package(OpenSSL REQUIRED COMPONENTS Crypto SSL)
+endif()
+
+if (CAPNP_LITE)
+  set(WITH_NOISE OFF)
+elseif (WITH_NOISE STREQUAL "AUTO")
+  find_package(noise-c)
+  if (NOISE_FOUND)
+    set(WITH_NOISE ON)
+  else()
+    set(WITH_NOISE OFF)
+  endif()
+elseif (WITH_NOISE)
+  #find_package(noise-c REQUIRED)
 endif()
 
 # shadow cache variable original value with ON/OFF,
