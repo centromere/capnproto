@@ -1,8 +1,8 @@
 #pragma once
 
-#include <kj/async-io.h>
-
 #include <noise/protocol.h>
+
+#include <kj/async-io.h>
 
 KJ_BEGIN_HEADER
 
@@ -11,6 +11,8 @@ namespace kj {
 class NoiseContext: public kj::SecureNetworkWrapper {
   public:
     NoiseContext();
+
+    ~NoiseContext();
 
     kj::Promise<kj::Own<kj::AsyncIoStream>> wrapServer(kj::Own<kj::AsyncIoStream> stream) {}
 

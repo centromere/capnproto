@@ -28,4 +28,10 @@ NoiseContext::NoiseContext() {
   std::cout.flush();
 }
 
+NoiseContext::~NoiseContext() {
+  if (this->hstate) {
+    noise_handshakestate_free(this->hstate);
+  }
+}
+
 }

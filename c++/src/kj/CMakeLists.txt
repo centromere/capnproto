@@ -211,31 +211,51 @@ if(WITH_OPENSSL)
   endif()
 endif()
 
-# kj-noise ======================================================================
+# kj-noise ====================================================================
 
 if(WITH_NOISE)
-  set(kj-noise
-    compat/noise.c++
-  )
-  set(kj-noise_headers
-    compat/noise.h
-  )
-  if(NOT CAPNP_LITE)
-    add_library(kj-noise ${kj-noise})
-    add_library(CapnProto::kj-noise ALIAS kj-noise)
-    target_link_libraries(kj-noise PUBLIC kj-async)
+  add_subdirectory(compat/noise)
+  get_target_property(kj-noiseprotocol_HEADERS kj-noiseprotocol INTERFACE_INCLUDE_DIRECTORIES)
 
-    target_include_directories(kj-noise PRIVATE /usr/local/noise/include)
+  if(NOT CAPNP_LITE)
+    add_library(kj-noise)
+    add_library(CapnProto::kj-noise ALIAS kj-noise)
+    add_dependencies(kj-noise kj-noiseprotocol)
+
+    target_sources(kj-noise PRIVATE
+      compat/noise.c++
+    )
+
+    target_sources(kj-noise PUBLIC
+      FILE_SET main
+      TYPE HEADERS
+      BASE_DIRS compat
+      FILES
+      compat/noise.h
+    )
 
     target_compile_definitions(kj-noise PRIVATE KJ_HAS_NOISE)
-    target_link_libraries(kj-noise PRIVATE /usr/local/noise/lib/libnoiseprotocol.a)
+
+    target_include_directories(kj-noise PRIVATE ${kj-noiseprotocol_HEADERS})
+    target_link_libraries(kj-noise PUBLIC kj-async kj-noiseprotocol)
 
     set_target_properties(kj-noise PROPERTIES VERSION ${VERSION})
-    install(TARGETS kj-noise ${INSTALL_TARGETS_DEFAULT_ARGS})
-    install(FILES ${kj-noise_headers} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kj/compat")
+
+    install(
+      TARGETS kj-noise
+      ${INSTALL_TARGETS_DEFAULT_ARGS}
+      FILE_SET main
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kj/compat"
+    )
+
+    install(
+      TARGETS kj-noiseprotocol
+      ${INSTALL_TARGETS_DEFAULT_ARGS}
+      FILE_SET main
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/kj/compat"
+    )
   endif()
 endif()
-
 
 # kj-gzip ======================================================================
 
