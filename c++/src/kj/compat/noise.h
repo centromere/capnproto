@@ -97,7 +97,7 @@ class NoiseContext: public kj::SecureNetworkWrapper {
     kj::Own<kj::Network> wrapNetwork(kj::Network& network) override;
 
   private:
-    friend class NoiseConnectionReceiver;
+    friend class NoiseHandshake;
 
     bool initiator;
     const kj::Maybe<kj::Own<const SecretKey<Curve25519>>> localIdentityM;

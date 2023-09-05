@@ -35,7 +35,10 @@ class NoiseNetworkAddress final: public kj::NetworkAddress {
     }
 
     kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
-      return this->inner->connect();
+      return this->inner->connect()
+        .then([this](auto stream) {
+          return noise.wrapClient(kj::mv(stream), ""_kj);
+        });
     }
 
     kj::Own<kj::ConnectionReceiver> listen() override {
@@ -80,14 +83,43 @@ class NoiseNetwork final: public kj::Network {
 
 class NoiseConnection final: public kj::AsyncIoStream {
   public:
-    NoiseConnection(kj::Own<kj::AsyncIoStream> stream) : inner(kj::mv(stream)) {}
+    NoiseConnection(kj::Own<kj::AsyncIoStream> stream,
+      NoiseCipherState* sendState,
+      NoiseCipherState* receiveState
+    ) : inner(kj::mv(stream)),
+        sendState(kj::Own<NoiseCipherState, CipherStateDisposer>(sendState)),
+        receiveState(kj::Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
 
     kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-      return this->inner->tryRead(buffer, minBytes, maxBytes);
+      return this->inner->read(this->bufferArray.begin(), 2)
+        .then([this]() {
+          const uint16_t length = this->bufferArray[0] << 8 | this->bufferArray[1];
+          std::cout << "i: " << length << std::endl;
+          return this->inner->read(this->bufferArray.begin(), length, length);
+        }).then([this, buffer, maxBytes](size_t numBytesRead) {
+          NoiseBuffer noiseBuffer;
+
+          noise_buffer_set_inout(noiseBuffer, this->bufferArray.begin(), numBytesRead, this->bufferArray.size());
+          noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
+          std::memcpy(buffer, noiseBuffer.data, maxBytes);
+
+          std::cout << "j: " << noiseBuffer.size << " " << maxBytes << std::endl;
+          return noiseBuffer.size;
+        });
     }
 
     Promise<void> write(const void* buffer, size_t size) override {
-      return kj::READY_NOW;
+      NoiseBuffer noiseBuffer;
+
+      std::memcpy(this->bufferArray.begin() + 2, buffer, size);
+      noise_buffer_set_inout(noiseBuffer, this->bufferArray.begin() + 2, size, this->bufferArray.size() - 2);
+      noise_cipherstate_encrypt(this->sendState, &noiseBuffer);
+      noiseBuffer.data -= 2;
+      noiseBuffer.data[0] = (uint8_t)noiseBuffer.size >> 8;
+      noiseBuffer.data[1] = (uint8_t)noiseBuffer.size;
+      noiseBuffer.size += 2;
+
+      return this->inner->write(noiseBuffer.data, noiseBuffer.size);
     }
 
     Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
@@ -101,46 +133,49 @@ class NoiseConnection final: public kj::AsyncIoStream {
     void shutdownWrite() override {}
 
   private:
+    class CipherStateDisposer {
+      public:
+        static void dispose(NoiseCipherState *ptr) {
+          noise_cipherstate_free(ptr);
+        }
+    };
+
     kj::Own<kj::AsyncIoStream> inner;
+    kj::Own<NoiseCipherState, CipherStateDisposer> sendState;
+    kj::Own<NoiseCipherState, CipherStateDisposer> receiveState;
+    kj::FixedArray<byte, NOISE_MAX_PAYLOAD_LEN + 2> bufferArray;
 };
 
-class NoiseConnectionReceiver final: public ConnectionReceiver {
+class NoiseHandshake {
   public:
-    NoiseConnectionReceiver(const NoiseContext& noise, kj::Own<kj::ConnectionReceiver> inner) : noise(noise), inner(kj::mv(inner)) {}
+    NoiseHandshake(NoiseContext& noise) : noise(noise) {}
 
-    kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override {
-      return this->inner->accept()
-        .then([this](auto stream) {
-          int err;
-          NoiseHandshakeState* tmpState;
+    kj::Promise<kj::Own<NoiseConnection>> run(kj::Own<kj::AsyncIoStream> stream) {
+      int err;
+      NoiseHandshakeState* tmpState;
 
-          err = noise_handshakestate_new_by_id(&tmpState, &this->noise.protocolId, this->noise.initiator ? NOISE_ROLE_INITIATOR : NOISE_ROLE_RESPONDER);
-          if (err != NOISE_ERROR_NONE)
-            noise_perror("unable to create handshake state", err);
+      err = noise_handshakestate_new_by_id(&tmpState, &this->noise.protocolId, this->noise.initiator ? NOISE_ROLE_INITIATOR : NOISE_ROLE_RESPONDER);
+      if (err != NOISE_ERROR_NONE)
+        noise_perror("unable to create handshake state", err);
 
-          kj::Own<NoiseHandshakeState, HandshakeDisposer> state = kj::Own<NoiseHandshakeState, HandshakeDisposer>(tmpState);
+      kj::Own<NoiseHandshakeState, HandshakeDisposer> state = kj::Own<NoiseHandshakeState, HandshakeDisposer>(tmpState);
 
-          err = noise_handshakestate_start(state);
-          if (err != NOISE_ERROR_NONE)
-            noise_perror("unable to start handshake", err);
+      err = noise_handshakestate_start(state);
+      if (err != NOISE_ERROR_NONE)
+        noise_perror("unable to start handshake", err);
 
-          // Plus two bytes for framing.
-          kj::Array<byte> bufferArray = kj::heapArray<byte>(NOISE_MAX_PAYLOAD_LEN + 2);
+      // Plus two bytes for framing.
+      kj::Array<byte> bufferArray = kj::heapArray<byte>(NOISE_MAX_PAYLOAD_LEN + 2);
 
-          kj::Own<HandshakeLoopParams> params = kj::heap<HandshakeLoopParams>();
-          params->state = kj::mv(state);
-          params->bufferArray = kj::mv(bufferArray);
-          params->stream = kj::mv(stream);
+      kj::Own<HandshakeLoopParams> params = kj::heap<HandshakeLoopParams>();
+      params->state = kj::mv(state);
+      params->bufferArray = kj::mv(bufferArray);
+      params->stream = kj::mv(stream);
 
-          return this->runHandshakeLoop(kj::mv(params));
-        }).then([](auto stream) mutable -> kj::Own<kj::AsyncIoStream> {
-          return kj::heap<NoiseConnection>(kj::mv(stream));
-        });
+      return this->runHandshakeLoop(kj::mv(params));
     }
 
-    uint getPort() override {
-      return this->inner->getPort();
-    }
+    ~NoiseHandshake() { std::cout << "dtor" << std::endl; }
 
   private:
     class HandshakeDisposer {
@@ -154,9 +189,11 @@ class NoiseConnectionReceiver final: public ConnectionReceiver {
       kj::Own<NoiseHandshakeState, HandshakeDisposer> state;
       kj::Array<byte> bufferArray;
       kj::Own<kj::AsyncIoStream> stream;
+      NoiseCipherState* sendState;
+      NoiseCipherState* receiveState;
     };
 
-    kj::Promise<kj::Own<kj::AsyncIoStream>> runHandshakeLoop(kj::Own<HandshakeLoopParams> params) {
+    kj::Promise<kj::Own<NoiseConnection>> runHandshakeLoop(kj::Own<HandshakeLoopParams> params) {
       std::cout << "a" << std::endl;
       switch (noise_handshakestate_get_action(params->state)) {
         case NOISE_ACTION_WRITE_MESSAGE:
@@ -168,11 +205,12 @@ class NoiseConnectionReceiver final: public ConnectionReceiver {
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to write handshake response into buffer", err);
 
-          noise_buffer_set_output(buffer, params->bufferArray.begin(), buffer.size + 2);
+          buffer.data -= 2;
           buffer.data[0] = (uint8_t)buffer.size >> 8;
           buffer.data[1] = (uint8_t)buffer.size;
+          buffer.size += 2;
 
-          std::cout << "b" << std::endl;
+          std::cout << "b: " << buffer.size << std::endl;
           return params->stream->write(buffer.data, buffer.size)
             .then([this, params = kj::mv(params)]() mutable {
               return this->runHandshakeLoop(kj::mv(params));
@@ -197,18 +235,55 @@ class NoiseConnectionReceiver final: public ConnectionReceiver {
               noise_buffer_set_input(buffer, params->bufferArray.begin(), length);
               err = noise_handshakestate_read_message(params->state, &buffer, nullptr);
               if (err != NOISE_ERROR_NONE)
-                noise_perror("unable to complete handshake", err);
+                noise_perror("unable to read handshake into buffer", err);
 
               std::cout << "d" << std::endl;
               return this->runHandshakeLoop(kj::mv(params));
             });
+
+        case NOISE_ACTION_SPLIT:
+          NoiseCipherState* sendState;
+          NoiseCipherState* receiveState;
+          err = noise_handshakestate_split(params->state, &sendState, &receiveState);
+          if (err != NOISE_ERROR_NONE)
+            noise_perror("unable to complete handshake", err);
+
+          std::cout << "g" << std::endl;
+
+          params->sendState = sendState;
+          params->receiveState = receiveState;
+
+          return this->runHandshakeLoop(kj::mv(params));
+
+        case NOISE_ACTION_COMPLETE:
+          std::cout << "h" << std::endl;
+          return kj::heap<NoiseConnection>(kj::mv(params->stream), params->sendState, params->receiveState);
       }
 
       std::cout << "e" << std::endl;
-      return kj::mv(params->stream);
     }
 
-    const NoiseContext& noise;
+    NoiseContext& noise;
+};
+
+class NoiseConnectionReceiver final: public ConnectionReceiver {
+  public:
+    NoiseConnectionReceiver(NoiseContext& noise, kj::Own<kj::ConnectionReceiver> inner) : noise(noise), inner(kj::mv(inner)) {}
+
+    kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override {
+      return this->inner->accept()
+        .then([this](auto stream) {
+          auto handshake = kj::heap<NoiseHandshake>(this->noise);
+          return handshake->run(kj::mv(stream));
+        }).then([](kj::Own<kj::AsyncIoStream> nc) { return nc; });
+    }
+
+    uint getPort() override {
+      return this->inner->getPort();
+    }
+
+  private:
+    NoiseContext& noise;
     kj::Own<ConnectionReceiver> inner;
 
 };
@@ -222,11 +297,12 @@ NoiseContext::NoiseContext(bool initiator, const kj::StringPtr protocol, kj::May
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> NoiseContext::wrapServer(kj::Own<kj::AsyncIoStream> stream) {
-  return kj::Promise<kj::Own<kj::AsyncIoStream>>(kj::heap<NoiseConnection>(kj::mv(stream)));
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> NoiseContext::wrapClient(kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedPeerIdentityStr) {
-  return kj::Promise<kj::Own<kj::AsyncIoStream>>(kj::heap<NoiseConnection>(kj::mv(stream)));
+  auto handshake = kj::heap<NoiseHandshake>(*this);
+  return handshake->run(kj::mv(stream))
+    .then([](kj::Own<kj::AsyncIoStream> nc) { return nc; });
 }
 
 kj::Own<kj::NetworkAddress> NoiseContext::wrapAddress(kj::Own<kj::NetworkAddress> address, const kj::Maybe<const kj::NoisePeerIdentity&> expectedPeerIdentityM) {
