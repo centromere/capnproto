@@ -10,8 +10,6 @@ KJ_BEGIN_HEADER
 
 namespace kj {
 
-typedef kj::FixedArray<byte, 32> Curve25519Key;
-
 template <uint8_t S>
 class FixedBase64Bytes : public kj::FixedArray<byte, S> {
   public:
@@ -76,22 +74,16 @@ class SecretKey: public PublicKey<DH> {
 
 class NoisePeerIdentity: public PeerIdentity {
   public:
-    static kj::Own<NoisePeerIdentity> newInstance(const Curve25519Key& publicKey, bool transmit);
-    static kj::Own<NoisePeerIdentity> newInstance(const kj::StringPtr publicKey, bool transmit);
+    static kj::Own<NoisePeerIdentity> newInstance(const kj::StringPtr identityStr);
 };
-
-/*class NoiseLocalIdentity: public PeerIdentity {
-  public:
-    static kj::Own<NoiseLocalIdentity> newInstance(const Curve25519Key
-}*/
 
 class NoiseContext: public kj::SecureNetworkWrapper {
   public:
-    NoiseContext(kj::Maybe<kj::StringPtr> localStaticKeyM);
+    NoiseContext(bool initiator, const kj::StringPtr protocol, kj::Maybe<kj::Own<const SecretKey<Curve25519>>> localIdentityM = nullptr);
 
     kj::Promise<kj::Own<kj::AsyncIoStream>> wrapServer(kj::Own<kj::AsyncIoStream> stream) override;
 
-    kj::Promise<kj::Own<kj::AsyncIoStream>> wrapClient(kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedServerHostname) {}
+    kj::Promise<kj::Own<kj::AsyncIoStream>> wrapClient(kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedServerHostname) override;
 
     kj::Promise<kj::AuthenticatedStream> wrapServer(kj::AuthenticatedStream stream) {}
     kj::Promise<kj::AuthenticatedStream> wrapClient(kj::AuthenticatedStream stream, kj::StringPtr expectedServerHostname) {}
@@ -100,13 +92,16 @@ class NoiseContext: public kj::SecureNetworkWrapper {
 
     kj::Own<kj::NetworkAddress> wrapAddress(kj::Own<kj::NetworkAddress> address, kj::StringPtr expectedServerHostname) {}
 
-    kj::Own<kj::NetworkAddress> wrapAddress(kj::Own<kj::NetworkAddress> address, kj::Maybe<kj::NoisePeerIdentity&> expectedPeerIdentityM);
+    kj::Own<kj::NetworkAddress> wrapAddress(kj::Own<kj::NetworkAddress> address, const kj::Maybe<const kj::NoisePeerIdentity&> expectedPeerIdentityM = nullptr);
 
     kj::Own<kj::Network> wrapNetwork(kj::Network& network) override;
 
   private:
-    kj::Maybe<Curve25519Key> localStaticKeyM;
-    NoiseProtocolId protocol;
+    friend class NoiseConnectionReceiver;
+
+    bool initiator;
+    const kj::Maybe<kj::Own<const SecretKey<Curve25519>>> localIdentityM;
+    NoiseProtocolId protocolId;
 };
 
 } // namespace kj
