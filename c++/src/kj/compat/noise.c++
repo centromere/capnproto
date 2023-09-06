@@ -91,38 +91,102 @@ class NoiseConnection final: public kj::AsyncIoStream {
         receiveState(kj::Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
 
     kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-      return this->inner->read(this->bufferArray.begin(), 2)
-        .then([this]() {
-          const uint16_t length = this->bufferArray[0] << 8 | this->bufferArray[1];
-          std::cout << "i: " << length << std::endl;
-          return this->inner->read(this->bufferArray.begin(), length, length);
-        }).then([this, buffer, maxBytes](size_t numBytesRead) {
+      const size_t leftoverSize = this->leftoverBytes.size();
+      if (leftoverSize >= minBytes) {
+        size_t numBytesRead = leftoverSize > maxBytes ? maxBytes : leftoverSize;
+        std::memcpy(buffer, this->leftoverBytes.begin(), numBytesRead);
+        this->leftoverBytes = kj::heapArray(this->leftoverBytes.slice(numBytesRead, numBytesRead + (leftoverSize - numBytesRead)));
+        return numBytesRead;
+      }
+
+      auto lengthBuffer = kj::heapArray<byte>(2);
+      return this->inner->read(lengthBuffer.begin(), 2)
+        .then([this, lengthBuffer = kj::mv(lengthBuffer)]() mutable {
+          const uint16_t length = lengthBuffer[0] << 8 | lengthBuffer[1];
+
+          auto readBuffer = kj::heapArray<byte>(length);
+          return this->inner->read((void*)readBuffer.begin(), length, length)
+            .then([readBuffer = kj::mv(readBuffer)](size_t numBytesRead) mutable { return kj::tuple(numBytesRead, kj::mv(readBuffer)); });
+        }).then([this, buffer, minBytes, maxBytes](auto result) mutable {
+          size_t numBytesRead = kj::get<0>(result);
+          kj::Array<byte> readBuffer = kj::mv(kj::get<1>(result));
+
+          int err;
           NoiseBuffer noiseBuffer;
 
-          noise_buffer_set_inout(noiseBuffer, this->bufferArray.begin(), numBytesRead, this->bufferArray.size());
-          noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
-          std::memcpy(buffer, noiseBuffer.data, maxBytes);
+          noise_buffer_set_inout(noiseBuffer, readBuffer.begin(), numBytesRead, readBuffer.size());
+          err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
+          if (err != NOISE_ERROR_NONE)
+            noise_perror("unable to decrypt read buffer", err);
 
-          std::cout << "j: " << noiseBuffer.size << " " << maxBytes << std::endl;
-          return noiseBuffer.size;
+          if (noiseBuffer.size < minBytes)
+            return this->tryRead(readBuffer.begin() + noiseBuffer.size, minBytes - noiseBuffer.size, maxBytes - noiseBuffer.size);
+
+          if (noiseBuffer.size < maxBytes) {
+            std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
+            return kj::Promise<size_t>(noiseBuffer.size);
+          } else {
+            std::memcpy(buffer, noiseBuffer.data, maxBytes);
+            this->leftoverBytes = kj::heapArray(noiseBuffer.data + maxBytes, noiseBuffer.size - maxBytes);
+            return kj::Promise<size_t>(maxBytes);
+          }
         });
     }
 
     Promise<void> write(const void* buffer, size_t size) override {
-      NoiseBuffer noiseBuffer;
+      const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
+      const size_t numChunks = (size / NOISE_MAX_PAYLOAD_LEN) + 1;
+      const size_t overhead = (2 + macSize) * numChunks; // 2-byte framing and MAC
 
-      std::memcpy(this->bufferArray.begin() + 2, buffer, size);
-      noise_buffer_set_inout(noiseBuffer, this->bufferArray.begin() + 2, size, this->bufferArray.size() - 2);
-      noise_cipherstate_encrypt(this->sendState, &noiseBuffer);
-      noiseBuffer.data -= 2;
-      noiseBuffer.data[0] = (uint8_t)noiseBuffer.size >> 8;
-      noiseBuffer.data[1] = (uint8_t)noiseBuffer.size;
-      noiseBuffer.size += 2;
+      auto builder = kj::heapArrayBuilder<byte>(size + overhead);
+      auto bufferInfoBuilder = kj::heapArrayBuilder<NoiseBuffer>(numChunks);
 
-      return this->inner->write(noiseBuffer.data, noiseBuffer.size);
+      byte* bufferPtr = (byte*)buffer;
+      size_t remaining = size;
+      size_t chunkSize;
+      NoiseBuffer bufferInfo;
+
+      while (remaining > 0) {
+        builder.resize(builder.size() + 2);
+
+        chunkSize = remaining > NOISE_MAX_PAYLOAD_LEN - macSize ? NOISE_MAX_PAYLOAD_LEN - macSize : remaining;
+        noise_buffer_set_inout(bufferInfo, builder.end(), chunkSize, chunkSize + macSize);
+        builder.addAll(bufferPtr, bufferPtr + chunkSize);
+        builder.resize(builder.size() + macSize);
+
+        bufferPtr += chunkSize;
+        remaining -= chunkSize;
+        bufferInfoBuilder.add(bufferInfo);
+      }
+
+      auto noiseBuffer = builder.finish();
+      auto bufferInfos = bufferInfoBuilder.finish().attach(kj::mv(noiseBuffer));
+
+      return this->writeInternal(kj::mv(bufferInfos), 0);
+    }
+
+    Promise<void> writeInternal(kj::Array<NoiseBuffer> bufferInfos, size_t position) {
+      if (position < bufferInfos.size()) {
+        NoiseBuffer& currentBuffer = bufferInfos[position];
+        int err;
+        err = noise_cipherstate_encrypt(this->sendState, &currentBuffer);
+        if (err != NOISE_ERROR_NONE)
+          noise_perror("unable to encrypt write buffer", err);
+
+        currentBuffer.data[-2] = (byte)(currentBuffer.size >> 8);
+        currentBuffer.data[-1] = (byte)currentBuffer.size;
+
+        return this->inner->write(currentBuffer.data - 2, currentBuffer.size + 2)
+          .then([this, bufferInfos = kj::mv(bufferInfos), position]() mutable {
+            return this->writeInternal(kj::mv(bufferInfos), position + 1);
+          });
+      }
+
+      return kj::READY_NOW;
     }
 
     Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
       return kj::READY_NOW;
     }
 
@@ -143,7 +207,7 @@ class NoiseConnection final: public kj::AsyncIoStream {
     kj::Own<kj::AsyncIoStream> inner;
     kj::Own<NoiseCipherState, CipherStateDisposer> sendState;
     kj::Own<NoiseCipherState, CipherStateDisposer> receiveState;
-    kj::FixedArray<byte, NOISE_MAX_PAYLOAD_LEN + 2> bufferArray;
+    kj::Array<byte> leftoverBytes;
 };
 
 class NoiseHandshake {
@@ -175,8 +239,6 @@ class NoiseHandshake {
       return this->runHandshakeLoop(kj::mv(params));
     }
 
-    ~NoiseHandshake() { std::cout << "dtor" << std::endl; }
-
   private:
     class HandshakeDisposer {
       public:
@@ -194,7 +256,6 @@ class NoiseHandshake {
     };
 
     kj::Promise<kj::Own<NoiseConnection>> runHandshakeLoop(kj::Own<HandshakeLoopParams> params) {
-      std::cout << "a" << std::endl;
       switch (noise_handshakestate_get_action(params->state)) {
         case NOISE_ACTION_WRITE_MESSAGE:
           NoiseBuffer buffer;
@@ -206,22 +267,19 @@ class NoiseHandshake {
             noise_perror("unable to write handshake response into buffer", err);
 
           buffer.data -= 2;
-          buffer.data[0] = (uint8_t)buffer.size >> 8;
+          buffer.data[0] = (uint8_t)(buffer.size >> 8);
           buffer.data[1] = (uint8_t)buffer.size;
           buffer.size += 2;
 
-          std::cout << "b: " << buffer.size << std::endl;
           return params->stream->write(buffer.data, buffer.size)
             .then([this, params = kj::mv(params)]() mutable {
               return this->runHandshakeLoop(kj::mv(params));
             });
 
         case NOISE_ACTION_READ_MESSAGE:
-          std::cout << "c" << std::endl;
           return params->stream->read(params->bufferArray.begin(), 2)
             .then([params = kj::mv(params)]() mutable {
                 const uint16_t length = params->bufferArray[0] << 8 | params->bufferArray[1];
-                std::cout << "f: " << length << std::endl;
                 return params->stream->read(params->bufferArray.begin(), length)
                   .then([length, params = kj::mv(params)]() mutable {
                     return kj::tuple(kj::mv(params), length);
@@ -237,7 +295,6 @@ class NoiseHandshake {
               if (err != NOISE_ERROR_NONE)
                 noise_perror("unable to read handshake into buffer", err);
 
-              std::cout << "d" << std::endl;
               return this->runHandshakeLoop(kj::mv(params));
             });
 
@@ -248,19 +305,14 @@ class NoiseHandshake {
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to complete handshake", err);
 
-          std::cout << "g" << std::endl;
-
           params->sendState = sendState;
           params->receiveState = receiveState;
 
           return this->runHandshakeLoop(kj::mv(params));
 
         case NOISE_ACTION_COMPLETE:
-          std::cout << "h" << std::endl;
           return kj::heap<NoiseConnection>(kj::mv(params->stream), params->sendState, params->receiveState);
       }
-
-      std::cout << "e" << std::endl;
     }
 
     NoiseContext& noise;
