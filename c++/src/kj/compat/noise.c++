@@ -81,6 +81,61 @@ class NoiseNetwork final: public kj::Network {
     kj::Network& inner;
 };
 
+class FramedIoStream: public kj::AsyncIoStream {
+  public:
+    FramedIoStream(kj::Own<kj::AsyncIoStream> stream) : inner(kj::mv(stream)) {}
+
+    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+      auto lengthBuffer = kj::heapArray<byte>(2);
+      return this->inner->read(lengthBuffer.begin(), 2)
+        .then([this, lengthBuffer = kj::mv(lengthBuffer), buffer]() mutable {
+          const uint16_t length = lengthBuffer[0] << 8 | lengthBuffer[1];
+          return this->inner->tryRead(buffer, length, length);
+        });
+    }
+
+    kj::Promise<void> write(const void* buffer, size_t size) override {
+      KJ_REQUIRE(size <= NOISE_MAX_PAYLOAD_LEN, "unable to write: provided buffer is too large");
+
+      auto lengthBuffer = kj::heapArray<byte>(2);
+      lengthBuffer[0] = (byte)(size >> 8);
+      lengthBuffer[1] = (byte)size;
+
+      auto piecesBuilder = kj::heapArrayBuilder<const ArrayPtr<const byte>>(2);
+      piecesBuilder.add(lengthBuffer);
+      piecesBuilder.add(kj::arrayPtr((byte*)buffer, size));
+      auto pieces = piecesBuilder.finish();
+
+      return this->inner->write(pieces).attach(kj::mv(pieces));
+    }
+
+    kj::Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
+      auto piece = pieces.front();
+      return this->write(piece.begin(), piece.size())
+        .then([this, pieces]() -> kj::Promise<void> {
+          if (pieces.size() > 1)
+            return this->write(pieces.slice(1, pieces.size() - 1));
+          return kj::READY_NOW;
+        }).catch_([](kj::Exception&& exception) {
+          KJ_LOG(ERROR, exception);
+          kj::throwFatalException(kj::mv(exception));
+        });
+    }
+
+    kj::Promise<void> whenWriteDisconnected() override {
+      KJ_LOG(INFO, "FramedIoStream::whenWriteDisconnected()");
+      return this->inner->whenWriteDisconnected();
+    }
+
+    void shutdownWrite() override {
+      KJ_LOG(INFO, "FramedIoStream::shutdownWrite()");
+      this->inner->shutdownWrite();
+    }
+
+  private:
+    kj::Own<kj::AsyncIoStream> inner;
+};
+
 class NoiseConnection final: public kj::AsyncIoStream {
   public:
     NoiseConnection(kj::Own<kj::AsyncIoStream> stream,
@@ -90,111 +145,112 @@ class NoiseConnection final: public kj::AsyncIoStream {
         sendState(kj::Own<NoiseCipherState, CipherStateDisposer>(sendState)),
         receiveState(kj::Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
 
+    ~NoiseConnection() noexcept(false) { std::cout << "dtor" << std::endl; }
+
     kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
       const size_t leftoverSize = this->leftoverBytes.size();
-      if (leftoverSize >= minBytes) {
-        size_t numBytesRead = leftoverSize > maxBytes ? maxBytes : leftoverSize;
-        std::memcpy(buffer, this->leftoverBytes.begin(), numBytesRead);
-        this->leftoverBytes = kj::heapArray(this->leftoverBytes.slice(numBytesRead, numBytesRead + (leftoverSize - numBytesRead)));
-        return numBytesRead;
+      if (leftoverSize > 0) {
+        const size_t numBytesToCopy = leftoverSize > maxBytes ? maxBytes : leftoverSize;
+        std::memcpy(buffer, this->leftoverBytes.begin(), numBytesToCopy);
+        KJ_LOG(ERROR, "[memcpy/a numBytesToCopy]", minBytes, maxBytes, numBytesToCopy, this->leftoverBytes.size());
+        this->leftoverBytes = kj::heapArray(this->leftoverBytes.slice(numBytesToCopy, leftoverSize - numBytesToCopy));
+
+        if (numBytesToCopy > minBytes)
+          return numBytesToCopy;
       }
 
-      auto lengthBuffer = kj::heapArray<byte>(2);
-      return this->inner->read(lengthBuffer.begin(), 2)
-        .then([this, lengthBuffer = kj::mv(lengthBuffer)]() mutable {
-          const uint16_t length = lengthBuffer[0] << 8 | lengthBuffer[1];
-
-          auto readBuffer = kj::heapArray<byte>(length);
-          return this->inner->read((void*)readBuffer.begin(), length, length)
-            .then([readBuffer = kj::mv(readBuffer)](size_t numBytesRead) mutable { return kj::tuple(numBytesRead, kj::mv(readBuffer)); });
-        }).then([this, buffer, minBytes, maxBytes](auto result) mutable {
-          size_t numBytesRead = kj::get<0>(result);
-          kj::Array<byte> readBuffer = kj::mv(kj::get<1>(result));
+      return this->inner->tryRead(this->readBuffer.begin(), 0, 0)
+        .then([this, buffer, minBytes, maxBytes](size_t numBytesRead) mutable {
+          NoiseBuffer noiseBuffer;
+          noise_buffer_set_inout(noiseBuffer, this->readBuffer.begin(), numBytesRead, readBuffer.size());
 
           int err;
-          NoiseBuffer noiseBuffer;
-
-          noise_buffer_set_inout(noiseBuffer, readBuffer.begin(), numBytesRead, readBuffer.size());
           err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to decrypt read buffer", err);
 
-          if (noiseBuffer.size < minBytes)
-            return this->tryRead(readBuffer.begin() + noiseBuffer.size, minBytes - noiseBuffer.size, maxBytes - noiseBuffer.size);
-
-          if (noiseBuffer.size < maxBytes) {
+          if (noiseBuffer.size < minBytes) {
             std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
-            return kj::Promise<size_t>(noiseBuffer.size);
-          } else {
+            KJ_LOG(ERROR, "[memcpy/b noiseBuffer.size]", minBytes, maxBytes, noiseBuffer.size, this->leftoverBytes.size());
+            const size_t parentNumBytesReturned = noiseBuffer.size;
+            return this->tryRead((byte*)buffer + noiseBuffer.size, minBytes - noiseBuffer.size, maxBytes - noiseBuffer.size)
+              .then([parentNumBytesReturned](size_t childNumBytesReturned) {
+                return parentNumBytesReturned + childNumBytesReturned;
+              }).catch_([](kj::Exception&& exception) {
+                if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+                  KJ_LOG(ERROR, exception);
+                  kj::throwFatalException(kj::mv(exception));
+                }
+                return (size_t)0;
+              });
+          }
+
+          if (noiseBuffer.size > maxBytes) {
             std::memcpy(buffer, noiseBuffer.data, maxBytes);
             this->leftoverBytes = kj::heapArray(noiseBuffer.data + maxBytes, noiseBuffer.size - maxBytes);
+            KJ_LOG(ERROR, "[memcpy/c maxBytes]", minBytes, maxBytes, noiseBuffer.size, this->leftoverBytes.size());
             return kj::Promise<size_t>(maxBytes);
+          } else {
+            std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
+            KJ_LOG(ERROR, "[memcpy/d noiseBuffer.size]", minBytes, maxBytes, noiseBuffer.size, this->leftoverBytes.size());
+            return kj::Promise<size_t>(noiseBuffer.size);
           }
         });
     }
 
     Promise<void> write(const void* buffer, size_t size) override {
+      //auto data = encodeHex(kj::arrayPtr((byte*)buffer, size));
+      //KJ_LOG(ERROR, "write()", data, size);
+
       const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
-      const size_t numChunks = (size / NOISE_MAX_PAYLOAD_LEN) + 1;
-      const size_t overhead = (2 + macSize) * numChunks; // 2-byte framing and MAC
+      auto noiseBufferBuilder = kj::heapArrayBuilder<byte>(size + macSize);
+      noiseBufferBuilder.addAll((byte*)buffer, (byte*)buffer + size);
+      KJ_LOG(ERROR, "addAll()", noiseBufferBuilder.size(), noiseBufferBuilder.capacity(), size);
+      noiseBufferBuilder.resize(noiseBufferBuilder.capacity());
+      auto noiseBuffer = noiseBufferBuilder.finish();
 
-      auto builder = kj::heapArrayBuilder<byte>(size + overhead);
-      auto bufferInfoBuilder = kj::heapArrayBuilder<NoiseBuffer>(numChunks);
-
-      byte* bufferPtr = (byte*)buffer;
-      size_t remaining = size;
-      size_t chunkSize;
       NoiseBuffer bufferInfo;
+      noise_buffer_set_inout(bufferInfo, noiseBuffer.begin(), size, noiseBuffer.size());
 
-      while (remaining > 0) {
-        builder.resize(builder.size() + 2);
+      int err;
+      err = noise_cipherstate_encrypt(this->sendState, &bufferInfo);
+      if (err != NOISE_ERROR_NONE)
+        noise_perror("unable to encrypt write buffer", err);
 
-        chunkSize = remaining > NOISE_MAX_PAYLOAD_LEN - macSize ? NOISE_MAX_PAYLOAD_LEN - macSize : remaining;
-        noise_buffer_set_inout(bufferInfo, builder.end(), chunkSize, chunkSize + macSize);
-        builder.addAll(bufferPtr, bufferPtr + chunkSize);
-        builder.resize(builder.size() + macSize);
-
-        bufferPtr += chunkSize;
-        remaining -= chunkSize;
-        bufferInfoBuilder.add(bufferInfo);
-      }
-
-      auto noiseBuffer = builder.finish();
-      auto bufferInfos = bufferInfoBuilder.finish().attach(kj::mv(noiseBuffer));
-
-      return this->writeInternal(kj::mv(bufferInfos), 0);
-    }
-
-    Promise<void> writeInternal(kj::Array<NoiseBuffer> bufferInfos, size_t position) {
-      if (position < bufferInfos.size()) {
-        NoiseBuffer& currentBuffer = bufferInfos[position];
-        int err;
-        err = noise_cipherstate_encrypt(this->sendState, &currentBuffer);
-        if (err != NOISE_ERROR_NONE)
-          noise_perror("unable to encrypt write buffer", err);
-
-        currentBuffer.data[-2] = (byte)(currentBuffer.size >> 8);
-        currentBuffer.data[-1] = (byte)currentBuffer.size;
-
-        return this->inner->write(currentBuffer.data - 2, currentBuffer.size + 2)
-          .then([this, bufferInfos = kj::mv(bufferInfos), position]() mutable {
-            return this->writeInternal(kj::mv(bufferInfos), position + 1);
-          });
-      }
-
-      return kj::READY_NOW;
+      return this->inner->write((void*)noiseBuffer.begin(), noiseBuffer.size())
+        .attach(kj::mv(noiseBuffer));
     }
 
     Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
+      /*auto p = pieces.begin();
+      while (p != pieces.end()) {
+        auto data = encodeHex(kj::arrayPtr(p->begin(), p->size()));
+        KJ_LOG(ERROR, "write2()", data);
+        p++;
+      }*/
+
+      auto piece = pieces.front();
+      return this->write(piece.begin(), piece.size())
+        .then([this, pieces]() -> kj::Promise<void> {
+          if (pieces.size() > 1)
+            return this->write(pieces.slice(1, pieces.size() - 1));
+          return kj::READY_NOW;
+        }).catch_([](kj::Exception&& exception) {
+          KJ_LOG(ERROR, exception);
+          kj::throwFatalException(kj::mv(exception));
+        });
       return kj::READY_NOW;
     }
 
     Promise<void> whenWriteDisconnected() override {
-      return kj::READY_NOW;
+      KJ_LOG(INFO, "NoiseConnection::whenWriteDisconnected()");
+      return this->inner->whenWriteDisconnected();
     }
 
-    void shutdownWrite() override {}
+    void shutdownWrite() override {
+      KJ_LOG(INFO, "NoiseConnection::shutdownWrite()");
+      this->inner->shutdownWrite();
+    }
 
   private:
     class CipherStateDisposer {
@@ -207,6 +263,7 @@ class NoiseConnection final: public kj::AsyncIoStream {
     kj::Own<kj::AsyncIoStream> inner;
     kj::Own<NoiseCipherState, CipherStateDisposer> sendState;
     kj::Own<NoiseCipherState, CipherStateDisposer> receiveState;
+    kj::FixedArray<byte, NOISE_MAX_PAYLOAD_LEN> readBuffer;
     kj::Array<byte> leftoverBytes;
 };
 
@@ -228,13 +285,10 @@ class NoiseHandshake {
       if (err != NOISE_ERROR_NONE)
         noise_perror("unable to start handshake", err);
 
-      // Plus two bytes for framing.
-      kj::Array<byte> bufferArray = kj::heapArray<byte>(NOISE_MAX_PAYLOAD_LEN + 2);
-
       kj::Own<HandshakeLoopParams> params = kj::heap<HandshakeLoopParams>();
       params->state = kj::mv(state);
-      params->bufferArray = kj::mv(bufferArray);
-      params->stream = kj::mv(stream);
+      params->bufferArray = kj::heapArray<byte>(NOISE_MAX_PAYLOAD_LEN);
+      params->stream = kj::heap<FramedIoStream>(kj::mv(stream));
 
       return this->runHandshakeLoop(kj::mv(params));
     }
@@ -261,15 +315,10 @@ class NoiseHandshake {
           NoiseBuffer buffer;
           int err;
 
-          noise_buffer_set_output(buffer, params->bufferArray.begin() + 2, params->bufferArray.size() - 2);
+          noise_buffer_set_output(buffer, params->bufferArray.begin(), params->bufferArray.size());
           err = noise_handshakestate_write_message(params->state, &buffer, nullptr);
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to write handshake response into buffer", err);
-
-          buffer.data -= 2;
-          buffer.data[0] = (uint8_t)(buffer.size >> 8);
-          buffer.data[1] = (uint8_t)buffer.size;
-          buffer.size += 2;
 
           return params->stream->write(buffer.data, buffer.size)
             .then([this, params = kj::mv(params)]() mutable {
@@ -277,18 +326,10 @@ class NoiseHandshake {
             });
 
         case NOISE_ACTION_READ_MESSAGE:
-          return params->stream->read(params->bufferArray.begin(), 2)
-            .then([params = kj::mv(params)]() mutable {
-                const uint16_t length = params->bufferArray[0] << 8 | params->bufferArray[1];
-                return params->stream->read(params->bufferArray.begin(), length)
-                  .then([length, params = kj::mv(params)]() mutable {
-                    return kj::tuple(kj::mv(params), length);
-                  });
-            }).then([this](auto result) mutable {
+          return params->stream->tryRead(params->bufferArray.begin(), 0, 0)
+            .then([this, params = kj::mv(params)](size_t length) mutable {
               NoiseBuffer buffer;
               int err;
-              auto params = kj::mv(kj::get<0>(result));
-              auto length = kj::get<1>(result);
 
               noise_buffer_set_input(buffer, params->bufferArray.begin(), length);
               err = noise_handshakestate_read_message(params->state, &buffer, nullptr);
@@ -313,6 +354,8 @@ class NoiseHandshake {
         case NOISE_ACTION_COMPLETE:
           return kj::heap<NoiseConnection>(kj::mv(params->stream), params->sendState, params->receiveState);
       }
+
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "invalid Noise action (this should never happen)"));
     }
 
     NoiseContext& noise;
@@ -349,6 +392,7 @@ NoiseContext::NoiseContext(bool initiator, const kj::StringPtr protocol, kj::May
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> NoiseContext::wrapServer(kj::Own<kj::AsyncIoStream> stream) {
+  kj::throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> NoiseContext::wrapClient(kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedPeerIdentityStr) {

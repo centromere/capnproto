@@ -386,6 +386,7 @@ public:
   }
 
   void taskFailed(kj::Exception&& exception) override {
+    KJ_LOG(ERROR, exception);
     disconnect(kj::mv(exception));
   }
 
