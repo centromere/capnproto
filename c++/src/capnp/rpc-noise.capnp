@@ -3,6 +3,11 @@
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("capnp::rpc::noise");
 
+struct Bytes16 {
+  a @0 :UInt64;
+  b @1 :UInt64;
+}
+
 struct Bytes32 {
   a @0 :UInt64;
   b @1 :UInt64;
@@ -18,17 +23,6 @@ struct Bytes56 {
   e @4 :UInt64;
   f @5 :UInt64;
   g @6 :UInt64;
-}
-
-struct Bytes64 {
-  a @0 :UInt64;
-  b @1 :UInt64;
-  c @2 :UInt64;
-  d @3 :UInt64;
-  e @4 :UInt64;
-  f @5 :UInt64;
-  g @6 :UInt64;
-  h @7 :UInt64;
 }
 
 struct PublicKey {
@@ -61,8 +55,13 @@ struct RecipientId {
 
 struct VatAddress {
   union {
-    ipv6 @0 :Bytes64;
-    ipv4 @1 :Bytes32;
+    ipv6 :group {
+      bytes @0 :Bytes16;
+    }
+
+    ipv4 :group {
+      bytes @1 :UInt32;
+    }
   }
 }
 

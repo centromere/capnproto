@@ -77,12 +77,13 @@ class NoisePeerIdentity: public PeerIdentity {
     static kj::Own<NoisePeerIdentity> newInstance(const kj::StringPtr identityStr);
 };
 
+class NoiseConnection;
+
 class NoiseContext: public kj::SecureNetworkWrapper {
   public:
     NoiseContext(bool initiator, const kj::StringPtr protocol, kj::Maybe<kj::Own<const SecretKey<Curve25519>>> localIdentityM = nullptr);
 
     kj::Promise<kj::Own<kj::AsyncIoStream>> wrapServer(kj::Own<kj::AsyncIoStream> stream) override;
-
     kj::Promise<kj::Own<kj::AsyncIoStream>> wrapClient(kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedServerHostname) override;
 
     kj::Promise<kj::AuthenticatedStream> wrapServer(kj::AuthenticatedStream stream) {}
@@ -91,7 +92,6 @@ class NoiseContext: public kj::SecureNetworkWrapper {
     kj::Own<kj::ConnectionReceiver> wrapPort(kj::Own<kj::ConnectionReceiver> port) override;
 
     kj::Own<kj::NetworkAddress> wrapAddress(kj::Own<kj::NetworkAddress> address, kj::StringPtr expectedServerHostname) {}
-
     kj::Own<kj::NetworkAddress> wrapAddress(kj::Own<kj::NetworkAddress> address, const kj::Maybe<const kj::NoisePeerIdentity&> expectedPeerIdentityM = nullptr);
 
     kj::Own<kj::Network> wrapNetwork(kj::Network& network) override;

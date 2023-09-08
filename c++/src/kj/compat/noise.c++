@@ -81,7 +81,7 @@ class NoiseNetwork final: public kj::Network {
     kj::Network& inner;
 };
 
-class FramedIoStream: public kj::AsyncIoStream {
+class FramedIoStream final: public kj::AsyncIoStream {
   public:
     FramedIoStream(kj::Own<kj::AsyncIoStream> stream) : inner(kj::mv(stream)) {}
 
@@ -106,7 +106,7 @@ class FramedIoStream: public kj::AsyncIoStream {
       piecesBuilder.add(kj::arrayPtr((byte*)buffer, size));
       auto pieces = piecesBuilder.finish();
 
-      return this->inner->write(pieces).attach(kj::mv(pieces));
+      return this->inner->write(pieces).attach(kj::mv(lengthBuffer));
     }
 
     kj::Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
@@ -145,14 +145,11 @@ class NoiseConnection final: public kj::AsyncIoStream {
         sendState(kj::Own<NoiseCipherState, CipherStateDisposer>(sendState)),
         receiveState(kj::Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
 
-    ~NoiseConnection() noexcept(false) { std::cout << "dtor" << std::endl; }
-
     kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
       const size_t leftoverSize = this->leftoverBytes.size();
       if (leftoverSize > 0) {
         const size_t numBytesToCopy = leftoverSize > maxBytes ? maxBytes : leftoverSize;
         std::memcpy(buffer, this->leftoverBytes.begin(), numBytesToCopy);
-        KJ_LOG(ERROR, "[memcpy/a numBytesToCopy]", minBytes, maxBytes, numBytesToCopy, this->leftoverBytes.size());
         this->leftoverBytes = kj::heapArray(this->leftoverBytes.slice(numBytesToCopy, leftoverSize - numBytesToCopy));
 
         if (numBytesToCopy > minBytes)
@@ -171,16 +168,13 @@ class NoiseConnection final: public kj::AsyncIoStream {
 
           if (noiseBuffer.size < minBytes) {
             std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
-            KJ_LOG(ERROR, "[memcpy/b noiseBuffer.size]", minBytes, maxBytes, noiseBuffer.size, this->leftoverBytes.size());
             const size_t parentNumBytesReturned = noiseBuffer.size;
             return this->tryRead((byte*)buffer + noiseBuffer.size, minBytes - noiseBuffer.size, maxBytes - noiseBuffer.size)
               .then([parentNumBytesReturned](size_t childNumBytesReturned) {
                 return parentNumBytesReturned + childNumBytesReturned;
               }).catch_([](kj::Exception&& exception) {
-                if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-                  KJ_LOG(ERROR, exception);
-                  kj::throwFatalException(kj::mv(exception));
-                }
+                KJ_LOG(ERROR, exception);
+                kj::throwFatalException(kj::mv(exception));
                 return (size_t)0;
               });
           }
@@ -188,24 +182,21 @@ class NoiseConnection final: public kj::AsyncIoStream {
           if (noiseBuffer.size > maxBytes) {
             std::memcpy(buffer, noiseBuffer.data, maxBytes);
             this->leftoverBytes = kj::heapArray(noiseBuffer.data + maxBytes, noiseBuffer.size - maxBytes);
-            KJ_LOG(ERROR, "[memcpy/c maxBytes]", minBytes, maxBytes, noiseBuffer.size, this->leftoverBytes.size());
             return kj::Promise<size_t>(maxBytes);
           } else {
             std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
-            KJ_LOG(ERROR, "[memcpy/d noiseBuffer.size]", minBytes, maxBytes, noiseBuffer.size, this->leftoverBytes.size());
             return kj::Promise<size_t>(noiseBuffer.size);
           }
         });
     }
 
     Promise<void> write(const void* buffer, size_t size) override {
-      //auto data = encodeHex(kj::arrayPtr((byte*)buffer, size));
-      //KJ_LOG(ERROR, "write()", data, size);
+      auto b = encodeHex(kj::arrayPtr((byte*)buffer, size));
+      KJ_LOG(ERROR, "write buffer", b);
 
       const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
       auto noiseBufferBuilder = kj::heapArrayBuilder<byte>(size + macSize);
       noiseBufferBuilder.addAll((byte*)buffer, (byte*)buffer + size);
-      KJ_LOG(ERROR, "addAll()", noiseBufferBuilder.size(), noiseBufferBuilder.capacity(), size);
       noiseBufferBuilder.resize(noiseBufferBuilder.capacity());
       auto noiseBuffer = noiseBufferBuilder.finish();
 
@@ -222,13 +213,6 @@ class NoiseConnection final: public kj::AsyncIoStream {
     }
 
     Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
-      /*auto p = pieces.begin();
-      while (p != pieces.end()) {
-        auto data = encodeHex(kj::arrayPtr(p->begin(), p->size()));
-        KJ_LOG(ERROR, "write2()", data);
-        p++;
-      }*/
-
       auto piece = pieces.front();
       return this->write(piece.begin(), piece.size())
         .then([this, pieces]() -> kj::Promise<void> {

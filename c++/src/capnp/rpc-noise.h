@@ -2,6 +2,7 @@
 
 #include <kj/async.h>
 #include <kj/async-io.h>
+#include <kj/compat/noise.h>
 
 #include "rpc.h"
 #include "serialize-async.h"
@@ -12,18 +13,14 @@ CAPNP_BEGIN_HEADER
 namespace capnp {
 
 typedef VatNetwork<rpc::noise::VatId, rpc::noise::ProvisionId,
-    rpc::noise::RecipientId, rpc::noise::ThirdPartyCapId, rpc::noise::JoinResult>
-    NoiseVatNetworkBase;
-
-class OutgoingMessageImpl;
+  rpc::noise::RecipientId, rpc::noise::ThirdPartyCapId, rpc::noise::JoinResult>
+  NoiseVatNetworkBase;
 
 class NoiseVatNetwork: public NoiseVatNetworkBase {
-  class IncomingMessageImpl;
-
   public:
     class Connection : public NoiseVatNetworkBase::Connection {
       public:
-        Connection(kj::Own<kj::AsyncIoStream> stream);
+        Connection(kj::Own<kj::NoiseConnection> stream);
 
         kj::Own<OutgoingRpcMessage> newOutgoingMessage(uint firstSegmentWordSize) override;
         kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> receiveIncomingMessage() override;
@@ -32,23 +29,17 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
         rpc::noise::VatId::Reader getPeerVatId() override;
 
       private:
-        friend class OutgoingMessageImpl;
-
-        class ErrorHandlerImpl: public kj::TaskSet::ErrorHandler {
-          public:
-            void taskFailed(kj::Exception&& exception) override {
-              kj::throwFatalException(kj::mv(exception));
-            }
-        };
+        class OutgoingMessageImpl;
+        class IncomingMessageImpl;
 
         kj::Own<capnp::AsyncIoMessageStream> msgStream;
-        kj::Promise<void> previousWrite;
+        kj::Maybe<kj::Promise<void>> previousWrite;
+        MallocMessageBuilder peerVatId;
     };
 
     NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM);
     NoiseVatNetwork(kj::Own<kj::AsyncIoStream> stream);
 
-    ~NoiseVatNetwork() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(NoiseVatNetwork);
 
     kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> connect(rpc::noise::VatId::Reader hostId) override;

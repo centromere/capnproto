@@ -18,9 +18,9 @@ CAPNP_BEGIN_HEADER
 namespace capnp {
 namespace schemas {
 
+CAPNP_DECLARE_SCHEMA(edb2506a94756af3);
 CAPNP_DECLARE_SCHEMA(edc39c3a02a8fdd1);
 CAPNP_DECLARE_SCHEMA(de87400d7443e74b);
-CAPNP_DECLARE_SCHEMA(c0fac1179c581999);
 CAPNP_DECLARE_SCHEMA(fe52c0b506a989fe);
 CAPNP_DECLARE_SCHEMA(bff48c8e38a0a259);
 CAPNP_DECLARE_SCHEMA(8f5aa1992abf961a);
@@ -28,6 +28,8 @@ CAPNP_DECLARE_SCHEMA(e8dbc9a120df5c91);
 CAPNP_DECLARE_SCHEMA(a3ddbffc26359181);
 CAPNP_DECLARE_SCHEMA(b3bcba4f99bc86fb);
 CAPNP_DECLARE_SCHEMA(e44821ae8fb5c580);
+CAPNP_DECLARE_SCHEMA(e4bd44206bd515f5);
+CAPNP_DECLARE_SCHEMA(bc308e43570d7f84);
 CAPNP_DECLARE_SCHEMA(8c20a2967c3f6ce2);
 CAPNP_DECLARE_SCHEMA(9aedbbe97b181a4e);
 
@@ -37,6 +39,21 @@ CAPNP_DECLARE_SCHEMA(9aedbbe97b181a4e);
 namespace capnp {
 namespace rpc {
 namespace noise {
+
+struct Bytes16 {
+  Bytes16() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(edb2506a94756af3, 2, 0)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
 
 struct Bytes32 {
   Bytes32() = delete;
@@ -62,21 +79,6 @@ struct Bytes56 {
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(de87400d7443e74b, 7, 0)
-    #if !CAPNP_LITE
-    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
-    #endif  // !CAPNP_LITE
-  };
-};
-
-struct Bytes64 {
-  Bytes64() = delete;
-
-  class Reader;
-  class Builder;
-  class Pipeline;
-
-  struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(c0fac1179c581999, 8, 0)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -189,9 +191,41 @@ struct VatAddress {
     IPV6,
     IPV4,
   };
+  struct Ipv6;
+  struct Ipv4;
 
   struct _capnpPrivate {
     CAPNP_DECLARE_STRUCT_HEADER(e44821ae8fb5c580, 1, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct VatAddress::Ipv6 {
+  Ipv6() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(e4bd44206bd515f5, 1, 1)
+    #if !CAPNP_LITE
+    static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
+    #endif  // !CAPNP_LITE
+  };
+};
+
+struct VatAddress::Ipv4 {
+  Ipv4() = delete;
+
+  class Reader;
+  class Builder;
+  class Pipeline;
+
+  struct _capnpPrivate {
+    CAPNP_DECLARE_STRUCT_HEADER(bc308e43570d7f84, 1, 1)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -229,6 +263,87 @@ struct JoinResult {
 };
 
 // =======================================================================================
+
+class Bytes16::Reader {
+public:
+  typedef Bytes16 Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getA() const;
+
+  inline  ::uint64_t getB() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class Bytes16::Builder {
+public:
+  typedef Bytes16 Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint64_t getA();
+  inline void setA( ::uint64_t value);
+
+  inline  ::uint64_t getB();
+  inline void setB( ::uint64_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class Bytes16::Pipeline {
+public:
+  typedef Bytes16 Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
 
 class Bytes32::Reader {
 public:
@@ -414,117 +529,6 @@ private:
 class Bytes56::Pipeline {
 public:
   typedef Bytes56 Pipelines;
-
-  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
-  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
-      : _typeless(kj::mv(typeless)) {}
-
-private:
-  ::capnp::AnyPointer::Pipeline _typeless;
-  friend class ::capnp::PipelineHook;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::ToDynamic_;
-};
-#endif  // !CAPNP_LITE
-
-class Bytes64::Reader {
-public:
-  typedef Bytes64 Reads;
-
-  Reader() = default;
-  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
-
-  inline ::capnp::MessageSize totalSize() const {
-    return _reader.totalSize().asPublic();
-  }
-
-#if !CAPNP_LITE
-  inline ::kj::StringTree toString() const {
-    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
-  }
-#endif  // !CAPNP_LITE
-
-  inline  ::uint64_t getA() const;
-
-  inline  ::uint64_t getB() const;
-
-  inline  ::uint64_t getC() const;
-
-  inline  ::uint64_t getD() const;
-
-  inline  ::uint64_t getE() const;
-
-  inline  ::uint64_t getF() const;
-
-  inline  ::uint64_t getG() const;
-
-  inline  ::uint64_t getH() const;
-
-private:
-  ::capnp::_::StructReader _reader;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::ToDynamic_;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::_::PointerHelpers;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::List;
-  friend class ::capnp::MessageBuilder;
-  friend class ::capnp::Orphanage;
-};
-
-class Bytes64::Builder {
-public:
-  typedef Bytes64 Builds;
-
-  Builder() = delete;  // Deleted to discourage incorrect usage.
-                       // You can explicitly initialize to nullptr instead.
-  inline Builder(decltype(nullptr)) {}
-  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
-  inline operator Reader() const { return Reader(_builder.asReader()); }
-  inline Reader asReader() const { return *this; }
-
-  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
-#if !CAPNP_LITE
-  inline ::kj::StringTree toString() const { return asReader().toString(); }
-#endif  // !CAPNP_LITE
-
-  inline  ::uint64_t getA();
-  inline void setA( ::uint64_t value);
-
-  inline  ::uint64_t getB();
-  inline void setB( ::uint64_t value);
-
-  inline  ::uint64_t getC();
-  inline void setC( ::uint64_t value);
-
-  inline  ::uint64_t getD();
-  inline void setD( ::uint64_t value);
-
-  inline  ::uint64_t getE();
-  inline void setE( ::uint64_t value);
-
-  inline  ::uint64_t getF();
-  inline void setF( ::uint64_t value);
-
-  inline  ::uint64_t getG();
-  inline void setG( ::uint64_t value);
-
-  inline  ::uint64_t getH();
-  inline void setH( ::uint64_t value);
-
-private:
-  ::capnp::_::StructBuilder _builder;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::ToDynamic_;
-  friend class ::capnp::Orphanage;
-  template <typename, ::capnp::Kind>
-  friend struct ::capnp::_::PointerHelpers;
-};
-
-#if !CAPNP_LITE
-class Bytes64::Pipeline {
-public:
-  typedef Bytes64 Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
@@ -1064,12 +1068,10 @@ public:
 
   inline Which which() const;
   inline bool isIpv6() const;
-  inline bool hasIpv6() const;
-  inline  ::capnp::rpc::noise::Bytes64::Reader getIpv6() const;
+  inline typename Ipv6::Reader getIpv6() const;
 
   inline bool isIpv4() const;
-  inline bool hasIpv4() const;
-  inline  ::capnp::rpc::noise::Bytes32::Reader getIpv4() const;
+  inline typename Ipv4::Reader getIpv4() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -1101,20 +1103,12 @@ public:
 
   inline Which which();
   inline bool isIpv6();
-  inline bool hasIpv6();
-  inline  ::capnp::rpc::noise::Bytes64::Builder getIpv6();
-  inline void setIpv6( ::capnp::rpc::noise::Bytes64::Reader value);
-  inline  ::capnp::rpc::noise::Bytes64::Builder initIpv6();
-  inline void adoptIpv6(::capnp::Orphan< ::capnp::rpc::noise::Bytes64>&& value);
-  inline ::capnp::Orphan< ::capnp::rpc::noise::Bytes64> disownIpv6();
+  inline typename Ipv6::Builder getIpv6();
+  inline typename Ipv6::Builder initIpv6();
 
   inline bool isIpv4();
-  inline bool hasIpv4();
-  inline  ::capnp::rpc::noise::Bytes32::Builder getIpv4();
-  inline void setIpv4( ::capnp::rpc::noise::Bytes32::Reader value);
-  inline  ::capnp::rpc::noise::Bytes32::Builder initIpv4();
-  inline void adoptIpv4(::capnp::Orphan< ::capnp::rpc::noise::Bytes32>&& value);
-  inline ::capnp::Orphan< ::capnp::rpc::noise::Bytes32> disownIpv4();
+  inline typename Ipv4::Builder getIpv4();
+  inline typename Ipv4::Builder initIpv4();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -1129,6 +1123,164 @@ private:
 class VatAddress::Pipeline {
 public:
   typedef VatAddress Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class VatAddress::Ipv6::Reader {
+public:
+  typedef Ipv6 Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline bool hasBytes() const;
+  inline  ::capnp::rpc::noise::Bytes16::Reader getBytes() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class VatAddress::Ipv6::Builder {
+public:
+  typedef Ipv6 Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline bool hasBytes();
+  inline  ::capnp::rpc::noise::Bytes16::Builder getBytes();
+  inline void setBytes( ::capnp::rpc::noise::Bytes16::Reader value);
+  inline  ::capnp::rpc::noise::Bytes16::Builder initBytes();
+  inline void adoptBytes(::capnp::Orphan< ::capnp::rpc::noise::Bytes16>&& value);
+  inline ::capnp::Orphan< ::capnp::rpc::noise::Bytes16> disownBytes();
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class VatAddress::Ipv6::Pipeline {
+public:
+  typedef Ipv6 Pipelines;
+
+  inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
+  inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
+      : _typeless(kj::mv(typeless)) {}
+
+  inline  ::capnp::rpc::noise::Bytes16::Pipeline getBytes();
+private:
+  ::capnp::AnyPointer::Pipeline _typeless;
+  friend class ::capnp::PipelineHook;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+};
+#endif  // !CAPNP_LITE
+
+class VatAddress::Ipv4::Reader {
+public:
+  typedef Ipv4 Reads;
+
+  Reader() = default;
+  inline explicit Reader(::capnp::_::StructReader base): _reader(base) {}
+
+  inline ::capnp::MessageSize totalSize() const {
+    return _reader.totalSize().asPublic();
+  }
+
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const {
+    return ::capnp::_::structString(_reader, *_capnpPrivate::brand());
+  }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint32_t getBytes() const;
+
+private:
+  ::capnp::_::StructReader _reader;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::List;
+  friend class ::capnp::MessageBuilder;
+  friend class ::capnp::Orphanage;
+};
+
+class VatAddress::Ipv4::Builder {
+public:
+  typedef Ipv4 Builds;
+
+  Builder() = delete;  // Deleted to discourage incorrect usage.
+                       // You can explicitly initialize to nullptr instead.
+  inline Builder(decltype(nullptr)) {}
+  inline explicit Builder(::capnp::_::StructBuilder base): _builder(base) {}
+  inline operator Reader() const { return Reader(_builder.asReader()); }
+  inline Reader asReader() const { return *this; }
+
+  inline ::capnp::MessageSize totalSize() const { return asReader().totalSize(); }
+#if !CAPNP_LITE
+  inline ::kj::StringTree toString() const { return asReader().toString(); }
+#endif  // !CAPNP_LITE
+
+  inline  ::uint32_t getBytes();
+  inline void setBytes( ::uint32_t value);
+
+private:
+  ::capnp::_::StructBuilder _builder;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::ToDynamic_;
+  friend class ::capnp::Orphanage;
+  template <typename, ::capnp::Kind>
+  friend struct ::capnp::_::PointerHelpers;
+};
+
+#if !CAPNP_LITE
+class VatAddress::Ipv4::Pipeline {
+public:
+  typedef Ipv4 Pipelines;
 
   inline Pipeline(decltype(nullptr)): _typeless(nullptr) {}
   inline explicit Pipeline(::capnp::AnyPointer::Pipeline&& typeless)
@@ -1308,6 +1460,34 @@ private:
 
 // =======================================================================================
 
+inline  ::uint64_t Bytes16::Reader::getA() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t Bytes16::Builder::getA() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Bytes16::Builder::setA( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline  ::uint64_t Bytes16::Reader::getB() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t Bytes16::Builder::getB() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void Bytes16::Builder::setB( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
 inline  ::uint64_t Bytes32::Reader::getA() const {
   return _reader.getDataField< ::uint64_t>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
@@ -1460,118 +1640,6 @@ inline  ::uint64_t Bytes56::Builder::getG() {
 inline void Bytes56::Builder::setG( ::uint64_t value) {
   _builder.setDataField< ::uint64_t>(
       ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getA() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getA() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setA( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getB() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getB() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setB( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getC() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getC() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setC( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getD() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getD() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<3>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setD( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<3>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getE() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getE() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setE( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<4>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getF() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getF() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setF( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getG() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getG() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setG( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
-}
-
-inline  ::uint64_t Bytes64::Reader::getH() const {
-  return _reader.getDataField< ::uint64_t>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
-}
-
-inline  ::uint64_t Bytes64::Builder::getH() {
-  return _builder.getDataField< ::uint64_t>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS);
-}
-inline void Bytes64::Builder::setH( ::uint64_t value) {
-  _builder.setDataField< ::uint64_t>(
-      ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::capnp::rpc::noise::PublicKey::Which PublicKey::Reader::which() const {
@@ -1865,106 +1933,95 @@ inline bool VatAddress::Reader::isIpv6() const {
 inline bool VatAddress::Builder::isIpv6() {
   return which() == VatAddress::IPV6;
 }
-inline bool VatAddress::Reader::hasIpv6() const {
-  if (which() != VatAddress::IPV6) return false;
-  return !_reader.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
-}
-inline bool VatAddress::Builder::hasIpv6() {
-  if (which() != VatAddress::IPV6) return false;
-  return !_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
-}
-inline  ::capnp::rpc::noise::Bytes64::Reader VatAddress::Reader::getIpv6() const {
+inline typename VatAddress::Ipv6::Reader VatAddress::Reader::getIpv6() const {
   KJ_IREQUIRE((which() == VatAddress::IPV6),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes64>::get(_reader.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
+  return typename VatAddress::Ipv6::Reader(_reader);
 }
-inline  ::capnp::rpc::noise::Bytes64::Builder VatAddress::Builder::getIpv6() {
+inline typename VatAddress::Ipv6::Builder VatAddress::Builder::getIpv6() {
   KJ_IREQUIRE((which() == VatAddress::IPV6),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes64>::get(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
+  return typename VatAddress::Ipv6::Builder(_builder);
 }
-inline void VatAddress::Builder::setIpv6( ::capnp::rpc::noise::Bytes64::Reader value) {
+inline typename VatAddress::Ipv6::Builder VatAddress::Builder::initIpv6() {
   _builder.setDataField<VatAddress::Which>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV6);
-  ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes64>::set(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS), value);
+  _builder.getPointerField(::capnp::bounded<0>() * ::capnp::POINTERS).clear();
+  return typename VatAddress::Ipv6::Builder(_builder);
 }
-inline  ::capnp::rpc::noise::Bytes64::Builder VatAddress::Builder::initIpv6() {
-  _builder.setDataField<VatAddress::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV6);
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes64>::init(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
-}
-inline void VatAddress::Builder::adoptIpv6(
-    ::capnp::Orphan< ::capnp::rpc::noise::Bytes64>&& value) {
-  _builder.setDataField<VatAddress::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV6);
-  ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes64>::adopt(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
-}
-inline ::capnp::Orphan< ::capnp::rpc::noise::Bytes64> VatAddress::Builder::disownIpv6() {
-  KJ_IREQUIRE((which() == VatAddress::IPV6),
-              "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes64>::disown(_builder.getPointerField(
-      ::capnp::bounded<0>() * ::capnp::POINTERS));
-}
-
 inline bool VatAddress::Reader::isIpv4() const {
   return which() == VatAddress::IPV4;
 }
 inline bool VatAddress::Builder::isIpv4() {
   return which() == VatAddress::IPV4;
 }
-inline bool VatAddress::Reader::hasIpv4() const {
-  if (which() != VatAddress::IPV4) return false;
+inline typename VatAddress::Ipv4::Reader VatAddress::Reader::getIpv4() const {
+  KJ_IREQUIRE((which() == VatAddress::IPV4),
+              "Must check which() before get()ing a union member.");
+  return typename VatAddress::Ipv4::Reader(_reader);
+}
+inline typename VatAddress::Ipv4::Builder VatAddress::Builder::getIpv4() {
+  KJ_IREQUIRE((which() == VatAddress::IPV4),
+              "Must check which() before get()ing a union member.");
+  return typename VatAddress::Ipv4::Builder(_builder);
+}
+inline typename VatAddress::Ipv4::Builder VatAddress::Builder::initIpv4() {
+  _builder.setDataField<VatAddress::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV4);
+  _builder.setDataField< ::uint32_t>(::capnp::bounded<1>() * ::capnp::ELEMENTS, 0);
+  return typename VatAddress::Ipv4::Builder(_builder);
+}
+inline bool VatAddress::Ipv6::Reader::hasBytes() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline bool VatAddress::Builder::hasIpv4() {
-  if (which() != VatAddress::IPV4) return false;
+inline bool VatAddress::Ipv6::Builder::hasBytes() {
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::capnp::rpc::noise::Bytes32::Reader VatAddress::Reader::getIpv4() const {
-  KJ_IREQUIRE((which() == VatAddress::IPV4),
-              "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes32>::get(_reader.getPointerField(
+inline  ::capnp::rpc::noise::Bytes16::Reader VatAddress::Ipv6::Reader::getBytes() const {
+  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes16>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::capnp::rpc::noise::Bytes32::Builder VatAddress::Builder::getIpv4() {
-  KJ_IREQUIRE((which() == VatAddress::IPV4),
-              "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes32>::get(_builder.getPointerField(
+inline  ::capnp::rpc::noise::Bytes16::Builder VatAddress::Ipv6::Builder::getBytes() {
+  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes16>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void VatAddress::Builder::setIpv4( ::capnp::rpc::noise::Bytes32::Reader value) {
-  _builder.setDataField<VatAddress::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV4);
-  ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes32>::set(_builder.getPointerField(
+#if !CAPNP_LITE
+inline  ::capnp::rpc::noise::Bytes16::Pipeline VatAddress::Ipv6::Pipeline::getBytes() {
+  return  ::capnp::rpc::noise::Bytes16::Pipeline(_typeless.getPointerField(0));
+}
+#endif  // !CAPNP_LITE
+inline void VatAddress::Ipv6::Builder::setBytes( ::capnp::rpc::noise::Bytes16::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes16>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::capnp::rpc::noise::Bytes32::Builder VatAddress::Builder::initIpv4() {
-  _builder.setDataField<VatAddress::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV4);
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes32>::init(_builder.getPointerField(
+inline  ::capnp::rpc::noise::Bytes16::Builder VatAddress::Ipv6::Builder::initBytes() {
+  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes16>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void VatAddress::Builder::adoptIpv4(
-    ::capnp::Orphan< ::capnp::rpc::noise::Bytes32>&& value) {
-  _builder.setDataField<VatAddress::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS, VatAddress::IPV4);
-  ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes32>::adopt(_builder.getPointerField(
+inline void VatAddress::Ipv6::Builder::adoptBytes(
+    ::capnp::Orphan< ::capnp::rpc::noise::Bytes16>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes16>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::capnp::rpc::noise::Bytes32> VatAddress::Builder::disownIpv4() {
-  KJ_IREQUIRE((which() == VatAddress::IPV4),
-              "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes32>::disown(_builder.getPointerField(
+inline ::capnp::Orphan< ::capnp::rpc::noise::Bytes16> VatAddress::Ipv6::Builder::disownBytes() {
+  return ::capnp::_::PointerHelpers< ::capnp::rpc::noise::Bytes16>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline  ::uint32_t VatAddress::Ipv4::Reader::getBytes() const {
+  return _reader.getDataField< ::uint32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint32_t VatAddress::Ipv4::Builder::getBytes() {
+  return _builder.getDataField< ::uint32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void VatAddress::Ipv4::Builder::setBytes( ::uint32_t value) {
+  _builder.setDataField< ::uint32_t>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool ThirdPartyCapId::Reader::hasAddress() const {
