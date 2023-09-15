@@ -60,21 +60,21 @@ NoiseVatNetwork::NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddr
 NoiseVatNetwork::NoiseVatNetwork(kj::Own<kj::AsyncIoMessageStream> stream) : streamM(kj::mv(stream)) {}
 
 kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc::noise::VatId::Reader hostId) {
-  KJ_IF_MAYBE(stream, this->streamM) {
-    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(*stream));
+  KJ_IF_SOME(stream, this->streamM) {
+    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(stream));
   } else {
     kj::throwFatalException(KJ_EXCEPTION(UNIMPLEMENTED, "foo"));
   }
 }
 
 kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() {
-  KJ_IF_MAYBE(receiver, this->receiverM) {
-    return (*receiver)->acceptMsg().then([](kj::Own<kj::AsyncIoMessageStream> stream) {
+  KJ_IF_SOME(receiver, this->receiverM) {
+    return receiver->acceptMsg().then([](kj::Own<kj::AsyncIoMessageStream> stream) {
       return kj::Own<NoiseVatNetworkBase::Connection>(kj::heap<NoiseVatNetwork::Connection>(mv(stream)));
     });
   } else {
-    KJ_IF_MAYBE(bindAddress, this->bindAddressM) {
-      this->receiverM = (*bindAddress)->listen();
+    KJ_IF_SOME(bindAddress, this->bindAddressM) {
+      this->receiverM = bindAddress->listen();
       return accept();
     } else {
       // Create a promise that will never be fulfilled.
@@ -115,7 +115,7 @@ kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection:
 }
 
 kj::Promise<void> NoiseVatNetwork::Connection::shutdown() {
-  this->previousWrite = nullptr;
+  this->previousWrite = kj::none;
 
   return kj::READY_NOW;
 }
