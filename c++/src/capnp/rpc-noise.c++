@@ -1,5 +1,3 @@
-#include <iostream>
-
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/memory.h>
@@ -23,18 +21,9 @@ class NoiseVatNetwork::Connection::OutgoingMessageImpl final : public OutgoingRp
       auto& previousWrite = KJ_ASSERT_NONNULL(this->conn.previousWrite, "connection already shut down");
       this->conn.previousWrite = previousWrite
         .then([this]() {
-          auto x = this->message.getSegmentsForOutput();
-          auto y = kj::heapArray<byte>(this->message.sizeInWords());
-          auto ptr = y.begin();
-          int i = 0;
-          while (ptr != y.end()) {
-            std::memcpy(ptr, x[i].begin(), x[i].size());
-            ptr += x[i].size();
-            i++;
-          }
-
-          return this->conn.inner->writeMessage(y)
-            .attach(kj::addRef(*this)).attach(kj::mv(y));
+          auto msg = messageToFlatArray(this->message);
+          return this->conn.inner->writeMessage(msg.asBytes())
+            .attach(kj::addRef(*this)).attach(kj::mv(msg));
         }).attach(kj::addRef(*this));
     }
 
@@ -118,11 +107,10 @@ kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection:
   return this->inner->tryReadMessage()
     .then([](auto msgM) -> kj::Maybe<kj::Own<IncomingRpcMessage>> {
       auto& msg = KJ_ASSERT_NONNULL(msgM, "failed to receive message");
-      KJ_LOG(ERROR, "Bar", msg.size());
-      auto x = kj::arrayPtr<const word>((const word *)msg.begin(), msg.size());
-      size_t expected = expectedSizeInWordsFromPrefix(x);
-      KJ_LOG(ERROR, "Foo", expected, x.size());
-      return kj::heap<IncomingMessageImpl>(x);
+      auto y = reinterpret_cast<word*>(msg.begin());
+      auto newMsg = kj::arrayPtr(y, msg.size() / 8);
+      KJ_LOG(ERROR, "expected", expectedSizeInWordsFromPrefix(newMsg));
+      return kj::heap<IncomingMessageImpl>(newMsg).attach(kj::mv(msg));
     });
 }
 

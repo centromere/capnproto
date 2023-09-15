@@ -1,5 +1,4 @@
 #include <iostream>
-#include <variant>
 
 #include <kj/debug.h>
 #include <kj/encoding.h>
@@ -103,6 +102,9 @@ class NoiseConnection final: public AsyncIoMessageStream {
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to decrypt read buffer", err);
 
+          auto b = arrayPtr<byte>(noiseBuffer.data, noiseBuffer.size);
+          auto c = encodeHex(b);
+          KJ_LOG(ERROR, "read buffer", c);
           return kj::heapArray(arrayPtr(noiseBuffer.data, noiseBuffer.size));
         });
     }
