@@ -4,8 +4,8 @@
 #include <kj/async-io.h>
 #include <kj/compat/noise.h>
 
-#include "rpc.h"
-#include "serialize-async.h"
+#include <capnp/rpc.h>
+#include <capnp/serialize-async.h>
 #include <capnp/rpc-noise.capnp.h>
 
 CAPNP_BEGIN_HEADER
@@ -20,7 +20,7 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
   public:
     class Connection : public NoiseVatNetworkBase::Connection {
       public:
-        Connection(kj::Own<kj::NoiseConnection> stream);
+        Connection(kj::Own<kj::AsyncIoMessageStream> inner);
 
         kj::Own<OutgoingRpcMessage> newOutgoingMessage(uint firstSegmentWordSize) override;
         kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> receiveIncomingMessage() override;
@@ -32,13 +32,13 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
         class OutgoingMessageImpl;
         class IncomingMessageImpl;
 
-        kj::Own<capnp::AsyncIoMessageStream> msgStream;
+        kj::Own<kj::AsyncIoMessageStream> inner;
         kj::Maybe<kj::Promise<void>> previousWrite;
         MallocMessageBuilder peerVatId;
     };
 
-    NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM);
-    NoiseVatNetwork(kj::Own<kj::AsyncIoStream> stream);
+    NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM = nullptr);
+    NoiseVatNetwork(kj::Own<kj::AsyncIoMessageStream> stream);
 
     KJ_DISALLOW_COPY_AND_MOVE(NoiseVatNetwork);
 
@@ -48,8 +48,8 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
   private:
     kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> receiverM;
-    kj::Maybe<kj::Own<kj::AsyncIoStream>> streamM;
     kj::Own<kj::PromiseFulfiller<kj::Own<NoiseVatNetworkBase::Connection>>> acceptFulfiller;
+    kj::Maybe<kj::Own<kj::AsyncIoMessageStream>> streamM;
 };
 
 } // namespace capnp

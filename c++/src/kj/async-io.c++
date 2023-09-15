@@ -3254,10 +3254,18 @@ Promise<AuthenticatedStream> ConnectionReceiver::acceptAuthenticated() {
   });
 }
 
+Promise<Own<AsyncIoMessageStream>> ConnectionReceiver::acceptMsg() {
+  KJ_UNIMPLEMENTED("acceptMsg not implemented");
+}
+
 Promise<AuthenticatedStream> NetworkAddress::connectAuthenticated() {
   return connect().then([](Own<AsyncIoStream> stream) {
     return AuthenticatedStream { kj::mv(stream), UnknownPeerIdentity::newInstance() };
   });
+}
+
+Promise<Own<AsyncIoMessageStream>> NetworkAddress::connectMsg() {
+  KJ_UNIMPLEMENTED("connectMsg not implemented");
 }
 
 }  // namespace kj

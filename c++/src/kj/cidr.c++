@@ -41,6 +41,8 @@
 #include <arpa/inet.h>
 #endif
 
+#include <netinet/in.h>
+
 namespace kj {
 
 CidrRange::CidrRange(StringPtr pattern) {

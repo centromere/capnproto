@@ -171,6 +171,13 @@ public:
   // isn't wrapping a file descriptor.
 };
 
+class AsyncIoMessageStream {
+public:
+  virtual Promise<Maybe<Array<byte>>> tryReadMessage() = 0;
+  virtual Promise<void> writeMessage(const ArrayPtr<const byte> msg) = 0;
+};
+
+
 Promise<uint64_t> unoptimizedPumpTo(
     AsyncInputStream& input, AsyncOutputStream& output, uint64_t amount,
     uint64_t completedSoFar = 0);
@@ -445,6 +452,8 @@ public:
   // For backwards-compatibility, the default implementation of this method calls `accept()` and
   // then adds `UnknownPeerIdentity`.
 
+  virtual Promise<Own<AsyncIoMessageStream>> acceptMsg();
+
   virtual uint getPort() = 0;
   // Gets the port number, if applicable (i.e. if listening on IP).  This is useful if you didn't
   // specify a port when constructing the NetworkAddress -- one will have been assigned
@@ -582,6 +591,8 @@ public:
   // For backwards-compatibility, the default implementation of this method calls `connect()` and
   // then uses a `NetworkPeerIdentity` wrapping a clone of this `NetworkAddress` -- which is not
   // particularly useful.
+
+  virtual Promise<Own<AsyncIoMessageStream>> connectMsg();
 
   virtual Own<ConnectionReceiver> listen() = 0;
   // Listen for incoming connections on this address.

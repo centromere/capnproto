@@ -5,236 +5,139 @@
 #include <kj/encoding.h>
 #include <kj/string-tree.h>
 
+#include "noise/noise-c/include/noise/protocol.h"
 #include "noise.h"
 
 namespace kj {
+
+int X25519::algorithmId() { return NOISE_DH_CURVE25519; }
+
+template <typename DH>
+SecretKey<DH>::SecretKey(const StringPtr secretData) : PublicKey<DH>(), secretData(secretData) {
+  NoiseDHState* state;
+  noise_dhstate_new_by_id(&state, DH::algorithmId());
+  noise_dhstate_set_keypair_private(state, this->secretData.begin(), this->secretData.size());
+  noise_dhstate_get_public_key(state, this->publicData.begin(), this->publicData.size());
+}
+
+template class SecretKey<X25519>;
 
 namespace {
 
 class NoisePeerIdentityImpl final: public NoisePeerIdentity {
   public:
-    NoisePeerIdentityImpl(const kj::StringPtr identityStr) : key(identityStr) {
-    }
+    NoisePeerIdentityImpl(const StringPtr identityStr) : key(identityStr) {}
 
-    kj::String toString() override {
-      return kj::str(this->key.getPublicData().asBase64());
+    String toString() override {
+      return str(this->key.getPublicData().asBase64());
     }
 
   private:
-    const PublicKey<Curve25519> key;
+    const PublicKey<X25519> key;
 };
 
 }  // namespace
 
-class NoiseNetworkAddress final: public kj::NetworkAddress {
+class NoiseMessageStream final: public AsyncIoMessageStream {
   public:
-    NoiseNetworkAddress(NoiseContext& noise, kj::Own<kj::NetworkAddress> inner, const kj::Maybe<const NoisePeerIdentity&> peerIdentityM = nullptr) : noise(noise), inner(kj::mv(inner)), peerIdentityM(peerIdentityM) {}
+    NoiseMessageStream(Own<AsyncIoStream> inner) : inner(mv(inner)) {}
 
-    kj::String toString() override {
-      return kj::str("noise:", this->inner->toString());
-    }
-
-    kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
-      return this->inner->connect()
-        .then([this](auto stream) {
-          return noise.wrapClient(kj::mv(stream), ""_kj);
-        });
-    }
-
-    kj::Own<kj::ConnectionReceiver> listen() override {
-      return noise.wrapPort(this->inner->listen());
-    }
-
-    kj::Own<kj::NetworkAddress> clone() override {
-      return this->inner->clone();
-    }
-
-  private:
-    NoiseContext& noise;
-    kj::Own<kj::NetworkAddress> inner;
-    const kj::Maybe<const NoisePeerIdentity&> peerIdentityM;
-};
-
-class NoiseNetwork final: public kj::Network {
-  public:
-    NoiseNetwork(NoiseContext& noise, kj::Network& inner) : noise(noise), inner(inner) {}
-
-    kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(kj::StringPtr addr, uint portHint = 0) override {
-      return this->inner.parseAddress(addr, portHint)
-        .then([this](auto addr) -> kj::Own<kj::NetworkAddress> {
-          return this->noise.wrapAddress(kj::mv(addr));
-        });
-    }
-
-    kj::Own<kj::NetworkAddress> getSockaddr(const void* sockaddr, uint len) override {
-      return this->inner.getSockaddr(sockaddr, len);
-    }
-
-    kj::Own<kj::Network> restrictPeers(
-      kj::ArrayPtr<const kj::StringPtr> allow,
-      kj::ArrayPtr<const kj::StringPtr> deny = nullptr) override {
-      return this->inner.restrictPeers(allow, deny);
-    }
-
-  private:
-    NoiseContext& noise;
-    kj::Network& inner;
-};
-
-class FramedIoStream final: public kj::AsyncIoStream {
-  public:
-    FramedIoStream(kj::Own<kj::AsyncIoStream> stream) : inner(kj::mv(stream)) {}
-
-    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-      auto lengthBuffer = kj::heapArray<byte>(2);
+    Promise<Maybe<Array<byte>>> tryReadMessage() override {
+      auto lengthBuffer = heapArray<byte>(2);
+      KJ_LOG(ERROR, "reading 2");
       return this->inner->read(lengthBuffer.begin(), 2)
-        .then([this, lengthBuffer = kj::mv(lengthBuffer), buffer]() mutable {
+        .then([this, lengthBuffer = mv(lengthBuffer)]() {
           const uint16_t length = lengthBuffer[0] << 8 | lengthBuffer[1];
-          return this->inner->tryRead(buffer, length, length);
+          KJ_LOG(ERROR, "reading", length);
+          auto buffer = heapArray<byte>(length);
+          return this->inner->tryRead((void*)buffer.begin(), length, length)
+            .then([buffer = mv(buffer)](auto numBytesRead) mutable {
+              return tuple(numBytesRead, mv(buffer));
+            });
+        }).then([](auto result) -> Maybe<Array<byte>> {
+          size_t numBytesRead = get<0>(result);
+          Array<byte> buffer = mv(get<1>(result));
+          if (numBytesRead != buffer.size())
+            return nullptr;
+          else
+            return mv(buffer);
         });
-    }
+    };
 
-    kj::Promise<void> write(const void* buffer, size_t size) override {
-      KJ_REQUIRE(size <= NOISE_MAX_PAYLOAD_LEN, "unable to write: provided buffer is too large");
+    Promise<void> writeMessage(const ArrayPtr<const byte> msg) override {
+      KJ_REQUIRE(msg.size() <= NOISE_MAX_PAYLOAD_LEN, "unable to write: provided buffer is too large");
 
-      auto lengthBuffer = kj::heapArray<byte>(2);
-      lengthBuffer[0] = (byte)(size >> 8);
-      lengthBuffer[1] = (byte)size;
+      auto lengthBuffer = heapArray<byte>(2);
+      lengthBuffer[0] = (byte)(msg.size() >> 8);
+      lengthBuffer[1] = (byte)msg.size();
 
-      auto piecesBuilder = kj::heapArrayBuilder<const ArrayPtr<const byte>>(2);
+      auto piecesBuilder = heapArrayBuilder<const ArrayPtr<const byte>>(2);
       piecesBuilder.add(lengthBuffer);
-      piecesBuilder.add(kj::arrayPtr((byte*)buffer, size));
+      piecesBuilder.add(msg);
       auto pieces = piecesBuilder.finish();
 
-      return this->inner->write(pieces).attach(kj::mv(lengthBuffer));
-    }
-
-    kj::Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
-      auto piece = pieces.front();
-      return this->write(piece.begin(), piece.size())
-        .then([this, pieces]() -> kj::Promise<void> {
-          if (pieces.size() > 1)
-            return this->write(pieces.slice(1, pieces.size() - 1));
-          return kj::READY_NOW;
-        }).catch_([](kj::Exception&& exception) {
-          KJ_LOG(ERROR, exception);
-          kj::throwFatalException(kj::mv(exception));
-        });
-    }
-
-    kj::Promise<void> whenWriteDisconnected() override {
-      KJ_LOG(INFO, "FramedIoStream::whenWriteDisconnected()");
-      return this->inner->whenWriteDisconnected();
-    }
-
-    void shutdownWrite() override {
-      KJ_LOG(INFO, "FramedIoStream::shutdownWrite()");
-      this->inner->shutdownWrite();
+      return this->inner->write(pieces).attach(mv(lengthBuffer));
     }
 
   private:
-    kj::Own<kj::AsyncIoStream> inner;
+    Own<AsyncIoStream> inner;
 };
 
-class NoiseConnection final: public kj::AsyncIoStream {
+class NoiseConnection final: public AsyncIoMessageStream {
   public:
-    NoiseConnection(kj::Own<kj::AsyncIoStream> stream,
-      NoiseCipherState* sendState,
-      NoiseCipherState* receiveState
-    ) : inner(kj::mv(stream)),
-        sendState(kj::Own<NoiseCipherState, CipherStateDisposer>(sendState)),
-        receiveState(kj::Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
+    NoiseConnection(Own<AsyncIoMessageStream> inner, NoiseCipherState* sendState, NoiseCipherState* receiveState) :
+      inner(mv(inner)),
+      sendState(Own<NoiseCipherState, CipherStateDisposer>(sendState)),
+      receiveState(Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
 
-    kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-      const size_t leftoverSize = this->leftoverBytes.size();
-      if (leftoverSize > 0) {
-        const size_t numBytesToCopy = leftoverSize > maxBytes ? maxBytes : leftoverSize;
-        std::memcpy(buffer, this->leftoverBytes.begin(), numBytesToCopy);
-        this->leftoverBytes = kj::heapArray(this->leftoverBytes.slice(numBytesToCopy, leftoverSize - numBytesToCopy));
+    Promise<Maybe<Array<byte>>> tryReadMessage() override {
+      return this->inner->tryReadMessage()
+        .then([this](auto msgM) mutable -> Maybe<Array<byte>> {
+          auto& msg = KJ_ASSERT_NONNULL(msgM, "failed to receive message");
 
-        if (numBytesToCopy > minBytes)
-          return numBytesToCopy;
-      }
-
-      return this->inner->tryRead(this->readBuffer.begin(), 0, 0)
-        .then([this, buffer, minBytes, maxBytes](size_t numBytesRead) mutable {
           NoiseBuffer noiseBuffer;
-          noise_buffer_set_inout(noiseBuffer, this->readBuffer.begin(), numBytesRead, readBuffer.size());
+          noise_buffer_set_inout(noiseBuffer, msg.begin(), msg.size(), msg.size());
 
           int err;
           err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to decrypt read buffer", err);
 
-          if (noiseBuffer.size < minBytes) {
-            std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
-            const size_t parentNumBytesReturned = noiseBuffer.size;
-            return this->tryRead((byte*)buffer + noiseBuffer.size, minBytes - noiseBuffer.size, maxBytes - noiseBuffer.size)
-              .then([parentNumBytesReturned](size_t childNumBytesReturned) {
-                return parentNumBytesReturned + childNumBytesReturned;
-              }).catch_([](kj::Exception&& exception) {
-                KJ_LOG(ERROR, exception);
-                kj::throwFatalException(kj::mv(exception));
-                return (size_t)0;
-              });
-          }
-
-          if (noiseBuffer.size > maxBytes) {
-            std::memcpy(buffer, noiseBuffer.data, maxBytes);
-            this->leftoverBytes = kj::heapArray(noiseBuffer.data + maxBytes, noiseBuffer.size - maxBytes);
-            return kj::Promise<size_t>(maxBytes);
-          } else {
-            std::memcpy(buffer, noiseBuffer.data, noiseBuffer.size);
-            return kj::Promise<size_t>(noiseBuffer.size);
-          }
+          return kj::heapArray(arrayPtr(noiseBuffer.data, noiseBuffer.size));
         });
     }
 
-    Promise<void> write(const void* buffer, size_t size) override {
-      auto b = encodeHex(kj::arrayPtr((byte*)buffer, size));
+    Promise<void> writeMessage(const ArrayPtr<const byte> msg) override {
+      auto b = encodeHex(msg);
       KJ_LOG(ERROR, "write buffer", b);
 
       const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
-      auto noiseBufferBuilder = kj::heapArrayBuilder<byte>(size + macSize);
-      noiseBufferBuilder.addAll((byte*)buffer, (byte*)buffer + size);
+      auto noiseBufferBuilder = heapArrayBuilder<byte>(msg.size() + macSize);
+      noiseBufferBuilder.addAll(msg);
       noiseBufferBuilder.resize(noiseBufferBuilder.capacity());
       auto noiseBuffer = noiseBufferBuilder.finish();
 
       NoiseBuffer bufferInfo;
-      noise_buffer_set_inout(bufferInfo, noiseBuffer.begin(), size, noiseBuffer.size());
+      noise_buffer_set_inout(bufferInfo, noiseBuffer.begin(), msg.size(), noiseBuffer.size());
 
       int err;
       err = noise_cipherstate_encrypt(this->sendState, &bufferInfo);
       if (err != NOISE_ERROR_NONE)
         noise_perror("unable to encrypt write buffer", err);
 
-      return this->inner->write((void*)noiseBuffer.begin(), noiseBuffer.size())
-        .attach(kj::mv(noiseBuffer));
+      return this->inner->writeMessage(noiseBuffer)
+        .attach(mv(noiseBuffer));
     }
 
-    Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
-      auto piece = pieces.front();
-      return this->write(piece.begin(), piece.size())
-        .then([this, pieces]() -> kj::Promise<void> {
-          if (pieces.size() > 1)
-            return this->write(pieces.slice(1, pieces.size() - 1));
-          return kj::READY_NOW;
-        }).catch_([](kj::Exception&& exception) {
-          KJ_LOG(ERROR, exception);
-          kj::throwFatalException(kj::mv(exception));
-        });
-      return kj::READY_NOW;
-    }
-
-    Promise<void> whenWriteDisconnected() override {
+    /*Promise<void> whenWriteDisconnected() override {}
       KJ_LOG(INFO, "NoiseConnection::whenWriteDisconnected()");
       return this->inner->whenWriteDisconnected();
     }
 
-    void shutdownWrite() override {
+    void shutdownWrite() override {}
       KJ_LOG(INFO, "NoiseConnection::shutdownWrite()");
       this->inner->shutdownWrite();
-    }
+    }*/
 
   private:
     class CipherStateDisposer {
@@ -244,37 +147,35 @@ class NoiseConnection final: public kj::AsyncIoStream {
         }
     };
 
-    kj::Own<kj::AsyncIoStream> inner;
-    kj::Own<NoiseCipherState, CipherStateDisposer> sendState;
-    kj::Own<NoiseCipherState, CipherStateDisposer> receiveState;
-    kj::FixedArray<byte, NOISE_MAX_PAYLOAD_LEN> readBuffer;
-    kj::Array<byte> leftoverBytes;
+    Own<AsyncIoMessageStream> inner;
+    Own<NoiseCipherState, CipherStateDisposer> sendState;
+    Own<NoiseCipherState, CipherStateDisposer> receiveState;
 };
 
 class NoiseHandshake {
   public:
     NoiseHandshake(NoiseContext& noise) : noise(noise) {}
 
-    kj::Promise<kj::Own<NoiseConnection>> run(kj::Own<kj::AsyncIoStream> stream) {
+    Promise<Own<NoiseConnection>> run(Own<AsyncIoMessageStream> stream) {
       int err;
       NoiseHandshakeState* tmpState;
 
-      err = noise_handshakestate_new_by_id(&tmpState, &this->noise.protocolId, this->noise.initiator ? NOISE_ROLE_INITIATOR : NOISE_ROLE_RESPONDER);
+      err = noise_handshakestate_new_by_id(&tmpState, (const NoiseProtocolId*)this->noise.protocolId.get(), this->noise.initiator ? NOISE_ROLE_INITIATOR : NOISE_ROLE_RESPONDER);
       if (err != NOISE_ERROR_NONE)
         noise_perror("unable to create handshake state", err);
 
-      kj::Own<NoiseHandshakeState, HandshakeDisposer> state = kj::Own<NoiseHandshakeState, HandshakeDisposer>(tmpState);
+      Own<NoiseHandshakeState, HandshakeDisposer> state = Own<NoiseHandshakeState, HandshakeDisposer>(tmpState);
 
       err = noise_handshakestate_start(state);
       if (err != NOISE_ERROR_NONE)
         noise_perror("unable to start handshake", err);
 
-      kj::Own<HandshakeLoopParams> params = kj::heap<HandshakeLoopParams>();
-      params->state = kj::mv(state);
-      params->bufferArray = kj::heapArray<byte>(NOISE_MAX_PAYLOAD_LEN);
-      params->stream = kj::heap<FramedIoStream>(kj::mv(stream));
+      Own<HandshakeLoopParams> params = heap<HandshakeLoopParams>();
+      params->state = mv(state);
+      params->bufferArray = heapArray<byte>(NOISE_MAX_PAYLOAD_LEN);
+      params->stream = mv(stream);
 
-      return this->runHandshakeLoop(kj::mv(params));
+      return this->runHandshakeLoop(mv(params));
     }
 
   private:
@@ -286,14 +187,14 @@ class NoiseHandshake {
     };
 
     struct HandshakeLoopParams {
-      kj::Own<NoiseHandshakeState, HandshakeDisposer> state;
-      kj::Array<byte> bufferArray;
-      kj::Own<kj::AsyncIoStream> stream;
+      Own<NoiseHandshakeState, HandshakeDisposer> state;
+      Array<byte> bufferArray;
+      Own<AsyncIoMessageStream> stream;
       NoiseCipherState* sendState;
       NoiseCipherState* receiveState;
     };
 
-    kj::Promise<kj::Own<NoiseConnection>> runHandshakeLoop(kj::Own<HandshakeLoopParams> params) {
+    Promise<Own<NoiseConnection>> runHandshakeLoop(Own<HandshakeLoopParams> params) {
       switch (noise_handshakestate_get_action(params->state)) {
         case NOISE_ACTION_WRITE_MESSAGE:
           NoiseBuffer buffer;
@@ -304,23 +205,24 @@ class NoiseHandshake {
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to write handshake response into buffer", err);
 
-          return params->stream->write(buffer.data, buffer.size)
-            .then([this, params = kj::mv(params)]() mutable {
-              return this->runHandshakeLoop(kj::mv(params));
+          return params->stream->writeMessage(arrayPtr(buffer.data, buffer.size))
+            .then([this, params = mv(params)]() mutable {
+              return this->runHandshakeLoop(mv(params));
             });
 
         case NOISE_ACTION_READ_MESSAGE:
-          return params->stream->tryRead(params->bufferArray.begin(), 0, 0)
-            .then([this, params = kj::mv(params)](size_t length) mutable {
+          return params->stream->tryReadMessage()
+            .then([this, params = mv(params)](Maybe<Array<byte>> msgM) mutable {
+              auto& msg = KJ_ASSERT_NONNULL(msgM, "connection shutdown");
               NoiseBuffer buffer;
               int err;
 
-              noise_buffer_set_input(buffer, params->bufferArray.begin(), length);
+              noise_buffer_set_input(buffer, msg.begin(), msg.size());
               err = noise_handshakestate_read_message(params->state, &buffer, nullptr);
               if (err != NOISE_ERROR_NONE)
                 noise_perror("unable to read handshake into buffer", err);
 
-              return this->runHandshakeLoop(kj::mv(params));
+              return this->runHandshakeLoop(mv(params));
             });
 
         case NOISE_ACTION_SPLIT:
@@ -333,28 +235,93 @@ class NoiseHandshake {
           params->sendState = sendState;
           params->receiveState = receiveState;
 
-          return this->runHandshakeLoop(kj::mv(params));
+          return this->runHandshakeLoop(mv(params));
 
         case NOISE_ACTION_COMPLETE:
-          return kj::heap<NoiseConnection>(kj::mv(params->stream), params->sendState, params->receiveState);
+          return heap<NoiseConnection>(mv(params->stream), params->sendState, params->receiveState);
       }
 
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "invalid Noise action (this should never happen)"));
+      throwFatalException(KJ_EXCEPTION(FAILED, "invalid Noise action (this should never happen)"));
     }
 
     NoiseContext& noise;
 };
 
+class NoiseNetworkAddress final: public NetworkAddress {
+  public:
+    NoiseNetworkAddress(NoiseContext& noise, Own<NetworkAddress> inner, const Maybe<const NoisePeerIdentity&> peerIdentityM = nullptr) : noise(noise), inner(mv(inner)), peerIdentityM(peerIdentityM) {}
+
+    String toString() override {
+      return str("noise:", this->inner->toString());
+    }
+
+    Promise<Own<AsyncIoStream>> connect() override {
+      KJ_UNIMPLEMENTED("accept() not implemented for NoiseNetworkAddress");
+    }
+
+    Promise<Own<AsyncIoMessageStream>> connectMsg() override {
+      return this->inner->connect()
+        .then([this](auto stream) {
+          auto handshake = heap<NoiseHandshake>(this->noise);
+          return handshake->run(heap<NoiseMessageStream>(mv(stream)))
+            .then([](Own<AsyncIoMessageStream> nc) { return nc; });
+        });
+    }
+
+    Own<ConnectionReceiver> listen() override {
+      return noise.wrapPort(this->inner->listen());
+    }
+
+    Own<NetworkAddress> clone() override {
+      return this->inner->clone();
+    }
+
+  private:
+    NoiseContext& noise;
+    Own<NetworkAddress> inner;
+    const Maybe<const NoisePeerIdentity&> peerIdentityM;
+};
+
+class NoiseNetwork final: public Network {
+  public:
+    NoiseNetwork(NoiseContext& noise, Network& inner) : noise(noise), inner(inner) {}
+
+    Promise<Own<NetworkAddress>> parseAddress(StringPtr addr, uint portHint = 0) override {
+      return this->inner.parseAddress(addr, portHint)
+        .then([this](auto addr) -> Own<NetworkAddress> {
+          return this->noise.wrapAddress(mv(addr));
+        });
+    }
+
+    Own<NetworkAddress> getSockaddr(const void* sockaddr, uint len) override {
+      return this->inner.getSockaddr(sockaddr, len);
+    }
+
+    Own<Network> restrictPeers(
+      ArrayPtr<const StringPtr> allow,
+      ArrayPtr<const StringPtr> deny = nullptr) override {
+      return this->inner.restrictPeers(allow, deny);
+    }
+
+  private:
+    NoiseContext& noise;
+    Network& inner;
+};
+
 class NoiseConnectionReceiver final: public ConnectionReceiver {
   public:
-    NoiseConnectionReceiver(NoiseContext& noise, kj::Own<kj::ConnectionReceiver> inner) : noise(noise), inner(kj::mv(inner)) {}
+    NoiseConnectionReceiver(NoiseContext& noise, Own<ConnectionReceiver> inner) : noise(noise), inner(mv(inner)) {}
 
-    kj::Promise<kj::Own<kj::AsyncIoStream>> accept() override {
+    Promise<Own<AsyncIoStream>> accept() override {
+      KJ_UNIMPLEMENTED("accept() not implemented for NoiseConnectionReceiver");
+    }
+
+    Promise<Own<AsyncIoMessageStream>> acceptMsg() override {
       return this->inner->accept()
-        .then([this](auto stream) {
-          auto handshake = kj::heap<NoiseHandshake>(this->noise);
-          return handshake->run(kj::mv(stream));
-        }).then([](kj::Own<kj::AsyncIoStream> nc) { return nc; });
+        .then([this](auto stream) -> Promise<Own<NoiseConnection>> {
+          auto handshake = heap<NoiseHandshake>(this->noise);
+          return handshake->run(heap<NoiseMessageStream>(mv(stream)));
+        }).then([](Own<NoiseConnection> nc) -> Own<AsyncIoMessageStream> { return nc; });
     }
 
     uint getPort() override {
@@ -363,38 +330,36 @@ class NoiseConnectionReceiver final: public ConnectionReceiver {
 
   private:
     NoiseContext& noise;
-    kj::Own<ConnectionReceiver> inner;
-
+    Own<ConnectionReceiver> inner;
 };
 
-kj::Own<NoisePeerIdentity> NoisePeerIdentity::newInstance(const kj::StringPtr identityStr) {
-  return kj::heap<NoisePeerIdentityImpl>(identityStr);
+Own<NoisePeerIdentity> NoisePeerIdentity::newInstance(const StringPtr identityStr) {
+  return heap<NoisePeerIdentityImpl>(identityStr);
 }
 
-NoiseContext::NoiseContext(bool initiator, const kj::StringPtr protocol, kj::Maybe<kj::Own<const SecretKey<Curve25519>>> localIdentityM) : initiator(initiator), localIdentityM(kj::mv(localIdentityM)) {
-  noise_protocol_name_to_id(&this->protocolId, protocol.cStr(), protocol.size());
+NoiseContext::NoiseContext(bool initiator, const StringPtr protocol, Maybe<Own<const SecretKey<X25519>>> localIdentityM) : initiator(initiator), localIdentityM(mv(localIdentityM)) {
+  this->protocolId = heap<NoiseProtocolId>();
+  noise_protocol_name_to_id((NoiseProtocolId*)this->protocolId.get(), protocol.cStr(), protocol.size());
 }
 
-kj::Promise<kj::Own<kj::AsyncIoStream>> NoiseContext::wrapServer(kj::Own<kj::AsyncIoStream> stream) {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
+Promise<Own<AsyncIoStream>> NoiseContext::wrapServer(Own<AsyncIoStream> stream) {
+  throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
 }
 
-kj::Promise<kj::Own<kj::AsyncIoStream>> NoiseContext::wrapClient(kj::Own<kj::AsyncIoStream> stream, kj::StringPtr expectedPeerIdentityStr) {
-  auto handshake = kj::heap<NoiseHandshake>(*this);
-  return handshake->run(kj::mv(stream))
-    .then([](kj::Own<kj::AsyncIoStream> nc) { return nc; });
+Promise<Own<AsyncIoStream>> NoiseContext::wrapClient(Own<AsyncIoStream> stream, StringPtr expectedPeerIdentityStr) {
+  throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
 }
 
-kj::Own<kj::NetworkAddress> NoiseContext::wrapAddress(kj::Own<kj::NetworkAddress> address, const kj::Maybe<const kj::NoisePeerIdentity&> expectedPeerIdentityM) {
-  return kj::heap<NoiseNetworkAddress>(*this, kj::mv(address), expectedPeerIdentityM);
+Own<NetworkAddress> NoiseContext::wrapAddress(Own<NetworkAddress> address, const Maybe<const NoisePeerIdentity&> expectedPeerIdentityM) {
+  return heap<NoiseNetworkAddress>(*this, mv(address), expectedPeerIdentityM);
 }
 
-kj::Own<kj::Network> NoiseContext::wrapNetwork(kj::Network& network) {
-  return kj::heap<NoiseNetwork>(*this, network);
+Own<Network> NoiseContext::wrapNetwork(Network& network) {
+  return heap<NoiseNetwork>(*this, network);
 }
 
-kj::Own<kj::ConnectionReceiver> NoiseContext::wrapPort(kj::Own<kj::ConnectionReceiver> port) {
-  return kj::heap<NoiseConnectionReceiver>(*this, kj::mv(port));
+Own<ConnectionReceiver> NoiseContext::wrapPort(Own<ConnectionReceiver> port) {
+  return heap<NoiseConnectionReceiver>(*this, mv(port));
 }
 
 }
