@@ -23,7 +23,7 @@ class NoiseVatNetwork::Connection::OutgoingMessageImpl final : public OutgoingRp
         .then([this]() {
           auto msg = messageToFlatArray(this->message);
           return this->conn.inner->writeMessage(msg.asBytes())
-            .attach(kj::addRef(*this)).attach(kj::mv(msg));
+            .attach(kj::mv(msg));
         }).attach(kj::addRef(*this));
     }
 

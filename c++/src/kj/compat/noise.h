@@ -1,4 +1,8 @@
 #pragma once
+/* This file provides support for the Noise key agreement framework (https://noiseprotocol.org).
+   It is currently based on the noise-c library by Rhys Weatherley
+   (https://github.com/rweather/noise-c).
+ */
 
 #include <kj/async-io.h>
 #include <kj/debug.h>
@@ -10,6 +14,8 @@ namespace kj {
 
 template <uint8_t S>
 class FixedBase64Bytes: public FixedArray<byte, S> {
+  // Helper class used to represent base64-encoded public and private keys.
+
   public:
     FixedBase64Bytes() {
       std::memset(this->begin(), 0, this->size());
@@ -25,6 +31,8 @@ class FixedBase64Bytes: public FixedArray<byte, S> {
 };
 
 class X25519: public FixedBase64Bytes<32> {
+  // Represents a X25519 key (public or private).
+
   public:
     X25519() : FixedBase64Bytes<32>() {}
     X25519(const StringPtr data) : FixedBase64Bytes<32>(data) {}
@@ -34,6 +42,8 @@ class X25519: public FixedBase64Bytes<32> {
 
 template <typename DH>
 class PublicKey {
+  // Represents a public key in a curve-agnostic way.
+
   public:
     PublicKey(const StringPtr publicData) : publicData(DH(publicData)) {}
     const DH& getPublicData() const { return this->publicData; }
@@ -46,6 +56,8 @@ class PublicKey {
 
 template <typename DH>
 class SecretKey: public PublicKey<DH> {
+  // Represents a secret key in a curve-agnostic way.
+
   public:
     SecretKey(const StringPtr secretData);
 

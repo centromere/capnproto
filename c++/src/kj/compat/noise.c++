@@ -43,11 +43,9 @@ class NoiseMessageStream final: public AsyncIoMessageStream {
 
     Promise<Maybe<Array<byte>>> tryReadMessage() override {
       auto lengthBuffer = heapArray<byte>(2);
-      KJ_LOG(ERROR, "reading 2");
       return this->inner->read(lengthBuffer.begin(), 2)
         .then([this, lengthBuffer = mv(lengthBuffer)]() {
           const uint16_t length = lengthBuffer[0] << 8 | lengthBuffer[1];
-          KJ_LOG(ERROR, "reading", length);
           auto buffer = heapArray<byte>(length);
           return this->inner->tryRead((void*)buffer.begin(), length, length)
             .then([buffer = mv(buffer)](auto numBytesRead) mutable {
@@ -57,7 +55,7 @@ class NoiseMessageStream final: public AsyncIoMessageStream {
           size_t numBytesRead = get<0>(result);
           Array<byte> buffer = mv(get<1>(result));
           if (numBytesRead != buffer.size())
-            return nullptr;
+            return kj::none;
           else
             return mv(buffer);
         });
@@ -102,17 +100,11 @@ class NoiseConnection final: public AsyncIoMessageStream {
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to decrypt read buffer", err);
 
-          auto b = arrayPtr<byte>(noiseBuffer.data, noiseBuffer.size);
-          auto c = encodeHex(b);
-          KJ_LOG(ERROR, "read buffer", c);
           return kj::heapArray(arrayPtr(noiseBuffer.data, noiseBuffer.size));
         });
     }
 
     Promise<void> writeMessage(const ArrayPtr<const byte> msg) override {
-      auto b = encodeHex(msg);
-      KJ_LOG(ERROR, "write buffer", b);
-
       const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
       auto noiseBufferBuilder = heapArrayBuilder<byte>(msg.size() + macSize);
       noiseBufferBuilder.addAll(msg);
@@ -251,7 +243,7 @@ class NoiseHandshake {
 
 class NoiseNetworkAddress final: public NetworkAddress {
   public:
-    NoiseNetworkAddress(NoiseContext& noise, Own<NetworkAddress> inner, const Maybe<const NoisePeerIdentity&> peerIdentityM = nullptr) : noise(noise), inner(mv(inner)), peerIdentityM(peerIdentityM) {}
+    NoiseNetworkAddress(NoiseContext& noise, Own<NetworkAddress> inner, const Maybe<const NoisePeerIdentity&> peerIdentityM = kj::none) : noise(noise), inner(mv(inner)), peerIdentityM(peerIdentityM) {}
 
     String toString() override {
       return str("noise:", this->inner->toString());
