@@ -171,12 +171,36 @@ public:
   // isn't wrapping a file descriptor.
 };
 
-class AsyncIoMessageStream {
+class AsyncInputMessageConduit: private AsyncObject {
+  // Provides a message-oriented interface for input.
+
 public:
   virtual Promise<Maybe<Array<byte>>> tryReadMessage() = 0;
-  virtual Promise<void> writeMessage(const ArrayPtr<const byte> msg) = 0;
 };
 
+class AsyncOutputMessageConduit: private AsyncObject {
+  // Provides a message-oriented interface for output.
+
+public:
+  virtual Promise<void> writeMessage(const ArrayPtr<const byte> msg) KJ_WARN_UNUSED_RESULT = 0;
+  virtual Promise<void> writeMessages(const ArrayPtr<const ArrayPtr<const byte>> msgs)
+    KJ_WARN_UNUSED_RESULT;
+  virtual Promise<void> whenWriteDisconnected() = 0;
+  virtual Maybe<size_t> getMaxMessageSize() = 0;
+};
+
+class AsyncIoMessageConduit: public AsyncInputMessageConduit, public AsyncOutputMessageConduit {
+  // A combination input and output message-based interface.
+
+public:
+  virtual void shutdownWrite() = 0;
+  virtual void abortRead() = 0;
+  virtual void getsockopt(int level, int option, void* value, uint* length);
+  virtual void setsockopt(int level, int option, const void* value, uint length);
+  virtual void getsockname(struct sockaddr* addr, uint* length);
+  virtual void getpeername(struct sockaddr* addr, uint* length);
+  virtual kj::Maybe<int> getFd() const { return kj::none; }
+};
 
 Promise<uint64_t> unoptimizedPumpTo(
     AsyncInputStream& input, AsyncOutputStream& output, uint64_t amount,
@@ -380,6 +404,11 @@ struct AuthenticatedStream {
   // documented promises, RTTI may be needed to query the type.
 };
 
+struct AuthenticatedMessageConduit {
+  Own<AsyncIoMessageConduit> conduit;
+  Own<PeerIdentity> peerIdentity;
+};
+
 class NetworkPeerIdentity: public PeerIdentity {
   // PeerIdentity used for network protocols like TCP/IP. This identifies the remote peer.
   //
@@ -452,7 +481,8 @@ public:
   // For backwards-compatibility, the default implementation of this method calls `accept()` and
   // then adds `UnknownPeerIdentity`.
 
-  virtual Promise<Own<AsyncIoMessageStream>> acceptMsg();
+  virtual Promise<Own<AsyncIoMessageConduit>> acceptMsgConduit();
+  virtual Promise<AuthenticatedMessageConduit> acceptAuthenticatedMsgConduit();
 
   virtual uint getPort() = 0;
   // Gets the port number, if applicable (i.e. if listening on IP).  This is useful if you didn't
@@ -592,7 +622,8 @@ public:
   // then uses a `NetworkPeerIdentity` wrapping a clone of this `NetworkAddress` -- which is not
   // particularly useful.
 
-  virtual Promise<Own<AsyncIoMessageStream>> connectMsg();
+  virtual Promise<Own<AsyncIoMessageConduit>> connectMsgConduit();
+  virtual Promise<AuthenticatedMessageConduit> connectAuthenticatedMsgConduit();
 
   virtual Own<ConnectionReceiver> listen() = 0;
   // Listen for incoming connections on this address.

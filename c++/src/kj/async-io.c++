@@ -207,6 +207,35 @@ Maybe<Promise<uint64_t>> AsyncOutputStream::tryPumpFrom(
   return kj::none;
 }
 
+Promise<void> AsyncOutputMessageConduit::writeMessages(const ArrayPtr<const ArrayPtr<const byte>> msgs) {
+  if (msgs.size() == 0)
+    return kj::READY_NOW;
+
+  if (msgs.size() == 1)
+    return this->writeMessage(msgs[0]);
+
+  return this->writeMessage(msgs[0])
+    .then([this, msgs]() {
+      return this->writeMessages(msgs.slice(1, msgs.size()));
+    });
+}
+
+void AsyncIoMessageConduit::getsockopt(int level, int option, void* value, uint* length) {
+  KJ_UNIMPLEMENTED("Not a socket.") { break; }
+}
+
+void AsyncIoMessageConduit::setsockopt(int level, int option, const void* value, uint length) {
+  KJ_UNIMPLEMENTED("Not a socket.") { break; }
+}
+
+void AsyncIoMessageConduit::getsockname(struct sockaddr* addr, uint* length) {
+  KJ_UNIMPLEMENTED("Not a socket.") { break; }
+}
+
+void AsyncIoMessageConduit::getpeername(struct sockaddr* addr, uint* length) {
+  KJ_UNIMPLEMENTED("Not a socket.") { break; }
+}
+
 namespace {
 
 class AsyncPipe final: public AsyncCapabilityStream, public Refcounted {
@@ -3254,8 +3283,12 @@ Promise<AuthenticatedStream> ConnectionReceiver::acceptAuthenticated() {
   });
 }
 
-Promise<Own<AsyncIoMessageStream>> ConnectionReceiver::acceptMsg() {
-  KJ_UNIMPLEMENTED("acceptMsg not implemented");
+Promise<Own<AsyncIoMessageConduit>> ConnectionReceiver::acceptMsgConduit() {
+  KJ_UNIMPLEMENTED("acceptMsgConduit not implemented");
+}
+
+Promise<AuthenticatedMessageConduit> ConnectionReceiver::acceptAuthenticatedMsgConduit() {
+  KJ_UNIMPLEMENTED("acceptAuthenticatedMsgConduit not implemented");
 }
 
 Promise<AuthenticatedStream> NetworkAddress::connectAuthenticated() {
@@ -3264,8 +3297,12 @@ Promise<AuthenticatedStream> NetworkAddress::connectAuthenticated() {
   });
 }
 
-Promise<Own<AsyncIoMessageStream>> NetworkAddress::connectMsg() {
-  KJ_UNIMPLEMENTED("connectMsg not implemented");
+Promise<Own<AsyncIoMessageConduit>> NetworkAddress::connectMsgConduit() {
+  KJ_UNIMPLEMENTED("connectMsgConduit not implemented");
+}
+
+Promise<AuthenticatedMessageConduit> NetworkAddress::connectAuthenticatedMsgConduit() {
+  KJ_UNIMPLEMENTED("connectAuthenticatedMsgConduit not implemented");
 }
 
 }  // namespace kj

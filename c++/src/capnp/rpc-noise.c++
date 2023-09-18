@@ -57,11 +57,11 @@ class NoiseVatNetwork::Connection::IncomingMessageImpl final: public IncomingRpc
 
 NoiseVatNetwork::NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM) : bindAddressM(kj::mv(bindAddressM)) {}
 
-NoiseVatNetwork::NoiseVatNetwork(kj::Own<kj::AsyncIoMessageStream> stream) : streamM(kj::mv(stream)) {}
+NoiseVatNetwork::NoiseVatNetwork(kj::Own<kj::AsyncIoMessageConduit> conduit) : conduitM(kj::mv(conduit)) {}
 
 kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc::noise::VatId::Reader hostId) {
-  KJ_IF_SOME(stream, this->streamM) {
-    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(stream));
+  KJ_IF_SOME(conduit, this->conduitM) {
+    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(conduit));
   } else {
     kj::throwFatalException(KJ_EXCEPTION(UNIMPLEMENTED, "foo"));
   }
@@ -69,8 +69,8 @@ kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc
 
 kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() {
   KJ_IF_SOME(receiver, this->receiverM) {
-    return receiver->acceptMsg().then([](kj::Own<kj::AsyncIoMessageStream> stream) {
-      return kj::Own<NoiseVatNetworkBase::Connection>(kj::heap<NoiseVatNetwork::Connection>(mv(stream)));
+    return receiver->acceptMsgConduit().then([](kj::Own<kj::AsyncIoMessageConduit> conduit) {
+      return kj::Own<NoiseVatNetworkBase::Connection>(kj::heap<NoiseVatNetwork::Connection>(mv(conduit)));
     });
   } else {
     KJ_IF_SOME(bindAddress, this->bindAddressM) {
@@ -85,7 +85,7 @@ kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() 
   }
 }
 
-NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoMessageStream> stream) : inner(kj::mv(stream)), previousWrite(kj::READY_NOW), peerVatId(4) {
+NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoMessageConduit> conduit) : inner(kj::mv(conduit)), previousWrite(kj::READY_NOW), peerVatId(4) {
   /*this->msgStream = kj::heap<capnp::AsyncIoMessageStream>(*stream).attach(kj::mv(stream));
 
   auto keyBytes = this->peerVatId.initRoot<rpc::noise::VatId>()
@@ -116,6 +116,7 @@ kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection:
 
 kj::Promise<void> NoiseVatNetwork::Connection::shutdown() {
   this->previousWrite = kj::none;
+  this->inner->shutdownWrite();
 
   return kj::READY_NOW;
 }
