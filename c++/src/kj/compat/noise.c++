@@ -37,31 +37,23 @@ class NoisePeerIdentityImpl final: public NoisePeerIdentity {
 
 }  // namespace
 
-class NoiseMessageStreamWrapper final: public AsyncIoMessageConduit {
+class NoiseMessageStreamWrapper {
   public:
     NoiseMessageStreamWrapper(Own<AsyncIoStream> inner) : inner(mv(inner)) {}
 
-    Promise<Maybe<Array<byte>>> tryReadMessage() override {
-      auto lengthBuffer = heapArray<byte>(2);
-      return this->inner->read(lengthBuffer.begin(), 2)
-        .then([this, lengthBuffer = mv(lengthBuffer)]() {
-          const uint16_t length = lengthBuffer[0] << 8 | lengthBuffer[1];
-          auto buffer = heapArray<byte>(length);
-          return this->inner->tryRead((void*)buffer.begin(), length, length)
-            .then([buffer = mv(buffer)](auto numBytesRead) mutable {
-              return tuple(numBytesRead, mv(buffer));
-            });
-        }).then([](auto result) -> Maybe<Array<byte>> {
-          size_t numBytesRead = get<0>(result);
-          Array<byte> buffer = mv(get<1>(result));
-          if (numBytesRead != buffer.size())
-            return kj::none;
-          else
-            return mv(buffer);
+    Promise<size_t> tryReadMessage(ArrayPtr<byte> buffer) {
+      KJ_REQUIRE(buffer.size() >= 2, "unable to read: provided buffer is too small");
+
+      return this->inner->read(buffer.begin(), 2)
+        .then([this, buffer = mv(buffer)]() {
+          const uint16_t incomingSize = buffer[0] << 8 | buffer[1];
+          KJ_REQUIRE(buffer.size() >= incomingSize, "unable to read: provided buffer is too small");
+
+          return this->inner->tryRead((void*)buffer.begin(), incomingSize, incomingSize);
         });
     };
 
-    Promise<void> writeMessage(const ArrayPtr<const byte> msg) override {
+    Promise<void> writeMessage(const ArrayPtr<const byte> msg) {
       KJ_REQUIRE(msg.size() <= NOISE_MAX_PAYLOAD_LEN, "unable to write: provided buffer is too large");
 
       auto lengthBuffer = heapArray<byte>(2);
@@ -76,54 +68,86 @@ class NoiseMessageStreamWrapper final: public AsyncIoMessageConduit {
       return this->inner->write(pieces).attach(mv(lengthBuffer));
     }
 
-    Promise<void> whenWriteDisconnected() override {
+    Promise<void> whenWriteDisconnected() {
       return this->inner->whenWriteDisconnected();
     }
 
-    Maybe<size_t> getMaxMessageSize() override {
-      return (uint16_t)-1;
-    }
-
-    void shutdownWrite() override {
+    void shutdownWrite() {
       this->inner->shutdownWrite();
-    }
-
-    void abortRead() override {
-      this->inner->abortRead();
-    }
-
-    void getsockopt(int level, int option, void* value, uint* length) override {
-      this->inner->getsockopt(level, option, value, length);
-    }
-
-    void setsockopt(int level, int option, const void* value, uint length) override {
-      this->inner->setsockopt(level, option, value, length);
-    }
-
-    void getsockname(struct sockaddr* addr, uint* length) override {
-      this->inner->getsockname(addr, length);
-    }
-
-    void getpeername(struct sockaddr* addr, uint* length) override {
-      this->inner->getpeername(addr, length);
-    }
-
-    kj::Maybe<int> getFd() const override {
-      return this->inner->getFd();
     }
 
   private:
     Own<AsyncIoStream> inner;
 };
 
-class NoiseConnection final: public AsyncIoMessageConduit {
+class NoiseConnection final: public AsyncIoStream {
   public:
-    NoiseConnection(Own<AsyncIoMessageConduit> inner, NoiseCipherState* sendState, NoiseCipherState* receiveState) :
+    NoiseConnection(Own<NoiseMessageStreamWrapper> inner, NoiseCipherState* sendState, NoiseCipherState* receiveState) :
       inner(mv(inner)),
       sendState(Own<NoiseCipherState, CipherStateDisposer>(sendState)),
       receiveState(Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
 
-    Promise<Maybe<Array<byte>>> tryReadMessage() override {
+    Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+      /*if (this->position.size() > 0) {
+        size_t numBytesToCopy = std::max(maxBytes, this->position.size());
+        std::memcpy(buffer, this->position.begin(), numBytesToCopy);
+      }
+      return minBytes;*/
+      return this->inner->tryReadMessage(this->buffer)
+        .then([this, buffer, maxBytes](size_t numBytesReceived) {
+          KJ_REQUIRE(numBytesReceived > 0, "EOF");
+
+          NoiseBuffer noiseBuffer;
+          noise_buffer_set_inout(noiseBuffer, this->buffer.begin(), numBytesReceived, this->buffer.size());
+
+          int err;
+          err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
+          if (err != NOISE_ERROR_NONE)
+            noise_perror("unable to decrypt read buffer", err);
+
+          std::memcpy(buffer, this->buffer.begin(), maxBytes);
+          return maxBytes;
+        });
+    }
+
+    Promise<void> write(const void* buffer, size_t size) {
+      return evalLater([this, buffer, size]() {
+        const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
+        auto noiseBufferBuilder = heapArrayBuilder<byte>(size + macSize);
+        noiseBufferBuilder.addAll((byte*)buffer, (byte*)buffer + size);
+        noiseBufferBuilder.resize(noiseBufferBuilder.capacity());
+        auto noiseBuffer = noiseBufferBuilder.finish();
+
+        NoiseBuffer bufferInfo;
+        noise_buffer_set_inout(bufferInfo, noiseBuffer.begin(), size, noiseBuffer.size());
+
+        int err;
+        err = noise_cipherstate_encrypt(this->sendState, &bufferInfo);
+        if (err != NOISE_ERROR_NONE)
+          noise_perror("unable to encrypt write buffer", err);
+
+        return this->inner->writeMessage(noiseBuffer)
+          .attach(mv(noiseBuffer));
+      });
+    }
+
+    Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) {
+      auto piece = pieces[0];
+      return this->write(piece.begin(), piece.size())
+        .then([this, pieces]() {
+          return this->write(pieces.slice(1, pieces.size()));
+        });
+    }
+
+    Promise<void> whenWriteDisconnected() {
+      return this->inner->whenWriteDisconnected();
+    }
+
+    void shutdownWrite() {
+      this->inner->shutdownWrite();
+    }
+
+    /*Promise<Maybe<Array<byte>>> tryReadMessage() override {
       return this->inner->tryReadMessage()
         .then([this](auto msgM) mutable -> Maybe<Array<byte>> {
           auto& msg = KJ_ASSERT_NONNULL(msgM, "failed to receive message");
@@ -173,7 +197,7 @@ class NoiseConnection final: public AsyncIoMessageConduit {
 
     void abortRead() override {
       this->inner->abortRead();
-    }
+    }*/
 
   private:
     class CipherStateDisposer {
@@ -183,16 +207,18 @@ class NoiseConnection final: public AsyncIoMessageConduit {
         }
     };
 
-    Own<AsyncIoMessageConduit> inner;
+    Own<NoiseMessageStreamWrapper> inner;
     Own<NoiseCipherState, CipherStateDisposer> sendState;
     Own<NoiseCipherState, CipherStateDisposer> receiveState;
+    FixedArray<byte, NOISE_MAX_PAYLOAD_LEN> buffer;
+    ArrayPtr<byte> position;
 };
 
 class NoiseHandshake {
   public:
     NoiseHandshake(NoiseContext& noise) : noise(noise) {}
 
-    Promise<Own<NoiseConnection>> run(Own<AsyncIoMessageConduit> stream) {
+    Promise<Own<NoiseConnection>> run(Own<NoiseMessageStreamWrapper> stream) {
       int err;
       NoiseHandshakeState* tmpState;
 
@@ -208,7 +234,7 @@ class NoiseHandshake {
 
       Own<HandshakeLoopParams> params = heap<HandshakeLoopParams>();
       params->state = mv(state);
-      params->bufferArray = heapArray<byte>(NOISE_MAX_PAYLOAD_LEN);
+      params->buffer = heapArray<byte>(512); // No handshake message should exceed this size
       params->stream = mv(stream);
 
       return this->runHandshakeLoop(mv(params));
@@ -224,8 +250,8 @@ class NoiseHandshake {
 
     struct HandshakeLoopParams {
       Own<NoiseHandshakeState, HandshakeDisposer> state;
-      Array<byte> bufferArray;
-      Own<AsyncIoMessageConduit> stream;
+      Array<byte> buffer;
+      Own<NoiseMessageStreamWrapper> stream;
       NoiseCipherState* sendState;
       NoiseCipherState* receiveState;
     };
@@ -233,28 +259,29 @@ class NoiseHandshake {
     Promise<Own<NoiseConnection>> runHandshakeLoop(Own<HandshakeLoopParams> params) {
       switch (noise_handshakestate_get_action(params->state)) {
         case NOISE_ACTION_WRITE_MESSAGE:
-          NoiseBuffer buffer;
+          NoiseBuffer bufferInfo;
           int err;
 
-          noise_buffer_set_output(buffer, params->bufferArray.begin(), params->bufferArray.size());
-          err = noise_handshakestate_write_message(params->state, &buffer, nullptr);
+          noise_buffer_set_output(bufferInfo, params->buffer.begin(), params->buffer.size());
+          err = noise_handshakestate_write_message(params->state, &bufferInfo, nullptr);
           if (err != NOISE_ERROR_NONE)
             noise_perror("unable to write handshake response into buffer", err);
 
-          return params->stream->writeMessage(arrayPtr(buffer.data, buffer.size))
+          return params->stream->writeMessage(arrayPtr(bufferInfo.data, bufferInfo.size))
             .then([this, params = mv(params)]() mutable {
               return this->runHandshakeLoop(mv(params));
             });
 
         case NOISE_ACTION_READ_MESSAGE:
-          return params->stream->tryReadMessage()
-            .then([this, params = mv(params)](Maybe<Array<byte>> msgM) mutable {
-              auto& msg = KJ_ASSERT_NONNULL(msgM, "connection shutdown");
-              NoiseBuffer buffer;
+          return params->stream->tryReadMessage(params->buffer)
+            .then([this, params = mv(params)](size_t msgSize) mutable {
+              KJ_REQUIRE(msgSize > 0, "connection was shut down during handshake loop");
+
+              NoiseBuffer bufferInfo;
               int err;
 
-              noise_buffer_set_input(buffer, msg.begin(), msg.size());
-              err = noise_handshakestate_read_message(params->state, &buffer, nullptr);
+              noise_buffer_set_input(bufferInfo, params->buffer.begin(), msgSize);
+              err = noise_handshakestate_read_message(params->state, &bufferInfo, nullptr);
               if (err != NOISE_ERROR_NONE)
                 noise_perror("unable to read handshake into buffer", err);
 
@@ -292,15 +319,11 @@ class NoiseNetworkAddress final: public NetworkAddress {
     }
 
     Promise<Own<AsyncIoStream>> connect() override {
-      KJ_UNIMPLEMENTED("accept() not implemented for NoiseNetworkAddress");
-    }
-
-    Promise<Own<AsyncIoMessageConduit>> connectMsgConduit() override {
       return this->inner->connect()
         .then([this](auto stream) {
           auto handshake = heap<NoiseHandshake>(this->noise);
           return handshake->run(heap<NoiseMessageStreamWrapper>(mv(stream)))
-            .then([](Own<AsyncIoMessageConduit> nc) { return nc; });
+            .then([](Own<AsyncIoStream> nc) { return nc; });
         });
     }
 
@@ -323,6 +346,7 @@ class NoiseNetwork final: public Network {
     NoiseNetwork(NoiseContext& noise, Network& inner) : noise(noise), inner(inner) {}
 
     Promise<Own<NetworkAddress>> parseAddress(StringPtr addr, uint portHint = 0) override {
+      // noise://WJ3FXzLmo0K9fRXm7UPi+dbesQW8q5bsmbz3fpKHpXM=@[::1]:3000
       return this->inner.parseAddress(addr, portHint)
         .then([this](auto addr) -> Own<NetworkAddress> {
           return this->noise.wrapAddress(mv(addr));
@@ -349,15 +373,11 @@ class NoiseConnectionReceiver final: public ConnectionReceiver {
     NoiseConnectionReceiver(NoiseContext& noise, Own<ConnectionReceiver> inner) : noise(noise), inner(mv(inner)) {}
 
     Promise<Own<AsyncIoStream>> accept() override {
-      KJ_UNIMPLEMENTED("accept() not implemented for NoiseConnectionReceiver");
-    }
-
-    Promise<Own<AsyncIoMessageConduit>> acceptMsgConduit() override {
       return this->inner->accept()
         .then([this](auto stream) -> Promise<Own<NoiseConnection>> {
           auto handshake = heap<NoiseHandshake>(this->noise);
           return handshake->run(heap<NoiseMessageStreamWrapper>(mv(stream)));
-        }).then([](Own<NoiseConnection> nc) -> Own<AsyncIoMessageConduit> { return nc; });
+        }).then([](Own<NoiseConnection> nc) -> Own<AsyncIoStream> { return nc; });
     }
 
     uint getPort() override {
@@ -379,11 +399,23 @@ NoiseContext::NoiseContext(bool initiator, const StringPtr protocol, Maybe<Own<c
 }
 
 Promise<Own<AsyncIoStream>> NoiseContext::wrapServer(Own<AsyncIoStream> stream) {
-  throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
+  KJ_UNIMPLEMENTED("not implemented");
 }
 
-Promise<Own<AsyncIoStream>> NoiseContext::wrapClient(Own<AsyncIoStream> stream, StringPtr expectedPeerIdentityStr) {
-  throwFatalException(KJ_EXCEPTION(FAILED, "not implemented"));
+Promise<Own<AsyncIoStream>> NoiseContext::wrapClient(Own<AsyncIoStream> stream, StringPtr expectedServerHostname) {
+  KJ_UNIMPLEMENTED("not implemented");
+}
+
+Promise<AuthenticatedStream> NoiseContext::wrapServer(AuthenticatedStream stream) {
+  KJ_UNIMPLEMENTED("not implemented");
+}
+
+Promise<AuthenticatedStream> NoiseContext::wrapClient(AuthenticatedStream stream, StringPtr expectedServerHostname) {
+  KJ_UNIMPLEMENTED("not implemented");
+}
+
+Own<NetworkAddress> NoiseContext::wrapAddress(Own<NetworkAddress> address, StringPtr expectedServerHostname) {
+  KJ_UNIMPLEMENTED("Identities in Noise are based on public keys, not hostnames");
 }
 
 Own<NetworkAddress> NoiseContext::wrapAddress(Own<NetworkAddress> address, const Maybe<const NoisePeerIdentity&> expectedPeerIdentityM) {

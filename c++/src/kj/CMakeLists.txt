@@ -80,7 +80,7 @@ add_library(CapnProto::kj ALIAS kj)
 target_compile_features(kj PUBLIC cxx_std_20)
 
 if(UNIX AND NOT ANDROID)
-  target_link_libraries(kj PUBLIC pthread)
+  target_link_libraries(kj PUBLIC pthread execinfo)
 endif()
 #make sure the lite flag propagates to all users (internal + external) of this library
 target_compile_definitions(kj PUBLIC ${CAPNP_LITE_FLAG})

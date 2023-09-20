@@ -1,8 +1,7 @@
 #pragma once
-/* This file provides support for the Noise key agreement framework (https://noiseprotocol.org).
-   It is currently based on the noise-c library by Rhys Weatherley
-   (https://github.com/rweather/noise-c).
- */
+// This file provides support for the Noise key agreement framework (https://noiseprotocol.org).
+// It is currently based on the noise-c library by Rhys Weatherley
+// (https://github.com/rweather/noise-c).
 
 #include <kj/async-io.h>
 #include <kj/debug.h>
@@ -77,12 +76,12 @@ class NoiseContext: public SecureNetworkWrapper {
     Promise<Own<AsyncIoStream>> wrapServer(Own<AsyncIoStream> stream) override;
     Promise<Own<AsyncIoStream>> wrapClient(Own<AsyncIoStream> stream, StringPtr expectedServerHostname) override;
 
-    Promise<AuthenticatedStream> wrapServer(AuthenticatedStream stream) {}
-    Promise<AuthenticatedStream> wrapClient(AuthenticatedStream stream, StringPtr expectedServerHostname) {}
+    Promise<AuthenticatedStream> wrapServer(AuthenticatedStream stream) override;
+    Promise<AuthenticatedStream> wrapClient(AuthenticatedStream stream, StringPtr expectedServerHostname) override;
 
     Own<ConnectionReceiver> wrapPort(Own<ConnectionReceiver> port) override;
 
-    Own<NetworkAddress> wrapAddress(Own<NetworkAddress> address, StringPtr expectedServerHostname) {}
+    Own<NetworkAddress> wrapAddress(Own<NetworkAddress> address, StringPtr expectedServerHostname) override;
     Own<NetworkAddress> wrapAddress(Own<NetworkAddress> address, const Maybe<const NoisePeerIdentity&> expectedPeerIdentityM = nullptr);
 
     Own<Network> wrapNetwork(Network& network) override;

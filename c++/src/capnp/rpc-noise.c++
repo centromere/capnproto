@@ -21,15 +21,12 @@ class NoiseVatNetwork::Connection::OutgoingMessageImpl final : public OutgoingRp
       auto& previousWrite = KJ_ASSERT_NONNULL(this->conn.previousWrite, "connection already shut down");
       this->conn.previousWrite = previousWrite
         .then([this]() {
-          auto msg = messageToFlatArray(this->message);
-          return this->conn.inner->writeMessage(msg.asBytes())
-            .attach(kj::mv(msg));
+          return this->conn.msgStream->writeMessage(this->message);
         }).attach(kj::addRef(*this));
     }
 
     size_t sizeInWords() override {
-      KJ_LOG(ERROR, "sizeInWords");
-      kj::throwFatalException(KJ_EXCEPTION(UNIMPLEMENTED, "sizeInWords"));
+      return this->message.sizeInWords();
     }
 
   private:
@@ -39,9 +36,7 @@ class NoiseVatNetwork::Connection::OutgoingMessageImpl final : public OutgoingRp
 
 class NoiseVatNetwork::Connection::IncomingMessageImpl final: public IncomingRpcMessage {
   public:
-    IncomingMessageImpl(const kj::ArrayPtr<const word> msg) {
-      this->msgReader = kj::heap<FlatArrayMessageReader>(msg);
-    }
+    IncomingMessageImpl(kj::Own<capnp::MessageReader> msgReader) : msgReader(kj::mv(msgReader)) {}
 
     AnyPointer::Reader getBody() override {
       return this->msgReader->getRoot<AnyPointer>();
@@ -57,11 +52,11 @@ class NoiseVatNetwork::Connection::IncomingMessageImpl final: public IncomingRpc
 
 NoiseVatNetwork::NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM) : bindAddressM(kj::mv(bindAddressM)) {}
 
-NoiseVatNetwork::NoiseVatNetwork(kj::Own<kj::AsyncIoMessageConduit> conduit) : conduitM(kj::mv(conduit)) {}
+NoiseVatNetwork::NoiseVatNetwork(kj::Own<kj::AsyncIoStream> stream) : streamM(kj::mv(stream)) {}
 
 kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc::noise::VatId::Reader hostId) {
-  KJ_IF_SOME(conduit, this->conduitM) {
-    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(conduit));
+  KJ_IF_SOME(stream, this->streamM) {
+    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(stream));
   } else {
     kj::throwFatalException(KJ_EXCEPTION(UNIMPLEMENTED, "foo"));
   }
@@ -69,8 +64,8 @@ kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc
 
 kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() {
   KJ_IF_SOME(receiver, this->receiverM) {
-    return receiver->acceptMsgConduit().then([](kj::Own<kj::AsyncIoMessageConduit> conduit) {
-      return kj::Own<NoiseVatNetworkBase::Connection>(kj::heap<NoiseVatNetwork::Connection>(mv(conduit)));
+    return receiver->accept().then([](kj::Own<kj::AsyncIoStream> stream) {
+      return kj::Own<NoiseVatNetworkBase::Connection>(kj::heap<NoiseVatNetwork::Connection>(mv(stream)));
     });
   } else {
     KJ_IF_SOME(bindAddress, this->bindAddressM) {
@@ -85,10 +80,10 @@ kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() 
   }
 }
 
-NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoMessageConduit> conduit) : inner(kj::mv(conduit)), previousWrite(kj::READY_NOW), peerVatId(4) {
-  /*this->msgStream = kj::heap<capnp::AsyncIoMessageStream>(*stream).attach(kj::mv(stream));
+NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoStream> stream) : previousWrite(kj::READY_NOW), peerVatId(4) {
+  this->msgStream = kj::heap<capnp::AsyncIoMessageStream>(*stream).attach(kj::mv(stream));
 
-  auto keyBytes = this->peerVatId.initRoot<rpc::noise::VatId>()
+  /*auto keyBytes = this->peerVatId.initRoot<rpc::noise::VatId>()
     .initPublicKey()
     .initX25519()
     .initBytes();
@@ -104,19 +99,16 @@ kj::Own<OutgoingRpcMessage> NoiseVatNetwork::Connection::newOutgoingMessage(uint
 }
 
 kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection::receiveIncomingMessage() {
-  return this->inner->tryReadMessage()
-    .then([](auto msgM) -> kj::Maybe<kj::Own<IncomingRpcMessage>> {
-      auto& msg = KJ_ASSERT_NONNULL(msgM, "failed to receive message");
-      auto y = reinterpret_cast<word*>(msg.begin());
-      auto newMsg = kj::arrayPtr(y, msg.size() / 8);
-      KJ_LOG(ERROR, "expected", expectedSizeInWordsFromPrefix(newMsg));
-      return kj::heap<IncomingMessageImpl>(newMsg).attach(kj::mv(msg));
+  return this->msgStream->tryReadMessage()
+    .then([](auto msgReaderM) {
+      return msgReaderM.map([](kj::Own<capnp::MessageReader>& msgReader) -> kj::Own<IncomingRpcMessage> {
+        return kj::heap<IncomingMessageImpl>(kj::mv(msgReader));
+      });
     });
 }
 
 kj::Promise<void> NoiseVatNetwork::Connection::shutdown() {
   this->previousWrite = kj::none;
-  this->inner->shutdownWrite();
 
   return kj::READY_NOW;
 }

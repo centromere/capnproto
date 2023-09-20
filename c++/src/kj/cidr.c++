@@ -41,7 +41,9 @@
 #include <arpa/inet.h>
 #endif
 
+#if __FreeBSD__
 #include <netinet/in.h>
+#endif
 
 namespace kj {
 

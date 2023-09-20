@@ -57,7 +57,7 @@
 #include <cxxabi.h>
 #endif
 
-#if (__linux__ && __GLIBC__ && !__UCLIBC__) || __APPLE__
+#if (__linux__ && __GLIBC__ && !__UCLIBC__) || __APPLE__ || __FreeBSD__
 #define KJ_HAS_BACKTRACE 1
 #include <execinfo.h>
 #endif
@@ -68,7 +68,7 @@
 #include <dbghelp.h>
 #endif
 
-#if (__linux__ || __APPLE__ || __CYGWIN__)
+#if (__linux__ || __APPLE__ || __CYGWIN__ || __FreeBSD__)
 #include <stdio.h>
 #include <pthread.h>
 #endif
@@ -76,6 +76,11 @@
 #if __CYGWIN__
 #include <sys/cygwin.h>
 #include <ucontext.h>
+#endif
+
+#if __FreeBSD__
+#include <sys/types.h>
+#include <sys/sysctl.h>
 #endif
 
 #if KJ_HAS_LIBDL
@@ -292,7 +297,7 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
 
   return strArray(lines, "");
 
-#elif (__linux__ || __APPLE__ || __CYGWIN__) && !__ANDROID__
+#elif (__linux__ || __APPLE__ || __CYGWIN__ || __FreeBSD__) && !__ANDROID__
   // We want to generate a human-readable stack trace.
 
   // TODO(someday):  It would be really great if we could avoid farming out to another process
@@ -344,6 +349,13 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
     return nullptr;
   }
   p = popen(str("addr2line -e '", exePosixPath, "' ", strTrace).cStr(), "r");
+#elif __FreeBSD__
+  const int oid[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+  size_t pathlen;
+  sysctl(oid, 4, nullptr, &pathlen, nullptr, 0);
+  String path = heapString(pathlen - 1); // pathlen includes NUL terminator, but heapString does not
+  sysctl(oid, 4, path.begin(), &pathlen, nullptr, 0);
+  p = popen(str("addr2line -Cpfe ", path, ' ', strTrace).cStr(), "r");
 #endif
 
   if (p == nullptr) {
