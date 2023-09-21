@@ -85,29 +85,38 @@ class NoiseConnection final: public AsyncIoStream {
     NoiseConnection(Own<NoiseMessageStreamWrapper> inner, NoiseCipherState* sendState, NoiseCipherState* receiveState) :
       inner(mv(inner)),
       sendState(Own<NoiseCipherState, CipherStateDisposer>(sendState)),
-      receiveState(Own<NoiseCipherState, CipherStateDisposer>(receiveState)) {}
+      receiveState(Own<NoiseCipherState, CipherStateDisposer>(receiveState)),
+      readPosition(arrayPtr(readBuffer.begin(), readBuffer.begin())) {}
 
     Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
-      /*if (this->position.size() > 0) {
-        size_t numBytesToCopy = std::max(maxBytes, this->position.size());
-        std::memcpy(buffer, this->position.begin(), numBytesToCopy);
-      }
-      return minBytes;*/
-      return this->inner->tryReadMessage(this->buffer)
-        .then([this, buffer, maxBytes](size_t numBytesReceived) {
-          KJ_REQUIRE(numBytesReceived > 0, "EOF");
+      return evalLater([this, buffer, minBytes, maxBytes]() -> Promise<size_t> {
+        if (this->readPosition.size() > 0) {
+          size_t numBytesToCopy = std::min(maxBytes, this->readPosition.size());
+          std::memcpy(buffer, this->readPosition.begin(), numBytesToCopy);
+          this->readPosition = this->readPosition.slice(numBytesToCopy, this->readPosition.size());
 
-          NoiseBuffer noiseBuffer;
-          noise_buffer_set_inout(noiseBuffer, this->buffer.begin(), numBytesReceived, this->buffer.size());
+          if (numBytesToCopy >= minBytes)
+            return numBytesToCopy;
+          else
+            return this->tryRead((byte*)buffer + numBytesToCopy, minBytes - numBytesToCopy, maxBytes - numBytesToCopy);
+        }
 
-          int err;
-          err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
-          if (err != NOISE_ERROR_NONE)
-            noise_perror("unable to decrypt read buffer", err);
+        return this->inner->tryReadMessage(this->readBuffer)
+          .then([this, buffer, minBytes, maxBytes](size_t numBytesReceived) {
+            KJ_REQUIRE(numBytesReceived > 0, "EOF");
 
-          std::memcpy(buffer, this->buffer.begin(), maxBytes);
-          return maxBytes;
-        });
+            NoiseBuffer noiseBuffer;
+            noise_buffer_set_inout(noiseBuffer, this->readBuffer.begin(), numBytesReceived, this->readBuffer.size());
+
+            int err;
+            err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
+            if (err != NOISE_ERROR_NONE)
+              noise_perror("unable to decrypt read buffer", err);
+
+            this->readPosition = arrayPtr(this->readBuffer.begin(), this->readBuffer.begin() + noiseBuffer.size);
+            return this->tryRead(buffer, minBytes, maxBytes);
+          });
+      });
     }
 
     Promise<void> write(const void* buffer, size_t size) {
@@ -132,11 +141,15 @@ class NoiseConnection final: public AsyncIoStream {
     }
 
     Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) {
-      auto piece = pieces[0];
-      return this->write(piece.begin(), piece.size())
-        .then([this, pieces]() {
-          return this->write(pieces.slice(1, pieces.size()));
-        });
+      if (pieces.size() > 0) {
+        auto piece = pieces[0];
+        return this->write(piece.begin(), piece.size())
+          .then([this, pieces]() {
+            return this->write(pieces.slice(1, pieces.size()));
+          });
+      }
+
+      return kj::READY_NOW;
     }
 
     Promise<void> whenWriteDisconnected() {
@@ -146,58 +159,6 @@ class NoiseConnection final: public AsyncIoStream {
     void shutdownWrite() {
       this->inner->shutdownWrite();
     }
-
-    /*Promise<Maybe<Array<byte>>> tryReadMessage() override {
-      return this->inner->tryReadMessage()
-        .then([this](auto msgM) mutable -> Maybe<Array<byte>> {
-          auto& msg = KJ_ASSERT_NONNULL(msgM, "failed to receive message");
-
-          NoiseBuffer noiseBuffer;
-          noise_buffer_set_inout(noiseBuffer, msg.begin(), msg.size(), msg.size());
-
-          int err;
-          err = noise_cipherstate_decrypt(this->receiveState, &noiseBuffer);
-          if (err != NOISE_ERROR_NONE)
-            noise_perror("unable to decrypt read buffer", err);
-
-          return kj::heapArray(arrayPtr(noiseBuffer.data, noiseBuffer.size));
-        });
-    }
-
-    Promise<void> writeMessage(const ArrayPtr<const byte> msg) override {
-      const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
-      auto noiseBufferBuilder = heapArrayBuilder<byte>(msg.size() + macSize);
-      noiseBufferBuilder.addAll(msg);
-      noiseBufferBuilder.resize(noiseBufferBuilder.capacity());
-      auto noiseBuffer = noiseBufferBuilder.finish();
-
-      NoiseBuffer bufferInfo;
-      noise_buffer_set_inout(bufferInfo, noiseBuffer.begin(), msg.size(), noiseBuffer.size());
-
-      int err;
-      err = noise_cipherstate_encrypt(this->sendState, &bufferInfo);
-      if (err != NOISE_ERROR_NONE)
-        noise_perror("unable to encrypt write buffer", err);
-
-      return this->inner->writeMessage(noiseBuffer)
-        .attach(mv(noiseBuffer));
-    }
-
-    Maybe<size_t> getMaxMessageSize() override {
-      return NOISE_MAX_PAYLOAD_LEN - noise_cipherstate_get_mac_length(this->sendState);
-    }
-
-    Promise<void> whenWriteDisconnected() override {
-      return this->inner->whenWriteDisconnected();
-    }
-
-    void shutdownWrite() override {
-      this->inner->shutdownWrite();
-    }
-
-    void abortRead() override {
-      this->inner->abortRead();
-    }*/
 
   private:
     class CipherStateDisposer {
@@ -210,8 +171,8 @@ class NoiseConnection final: public AsyncIoStream {
     Own<NoiseMessageStreamWrapper> inner;
     Own<NoiseCipherState, CipherStateDisposer> sendState;
     Own<NoiseCipherState, CipherStateDisposer> receiveState;
-    FixedArray<byte, NOISE_MAX_PAYLOAD_LEN> buffer;
-    ArrayPtr<byte> position;
+    FixedArray<byte, NOISE_MAX_PAYLOAD_LEN> readBuffer;
+    ArrayPtr<byte> readPosition;
 };
 
 class NoiseHandshake {
