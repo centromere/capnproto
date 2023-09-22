@@ -44,11 +44,18 @@ class NoiseMessageStreamWrapper {
     Promise<size_t> tryReadMessage(ArrayPtr<byte> buffer) {
       KJ_REQUIRE(buffer.size() >= 2, "unable to read: provided buffer is too small");
 
-      return this->inner->read(buffer.begin(), 2)
-        .then([this, buffer = mv(buffer)]() {
+      KJ_LOG(ERROR, "tryRead");
+      return this->inner->tryRead(buffer.begin(), 2, 2)
+        .then([this, buffer = mv(buffer)](size_t numBytesReceived) {
+          if (numBytesReceived != 2) {
+            KJ_LOG(ERROR, "EOF");
+            return Promise<size_t>((size_t)0);
+          }
+
           const uint16_t incomingSize = buffer[0] << 8 | buffer[1];
           KJ_REQUIRE(buffer.size() >= incomingSize, "unable to read: provided buffer is too small");
 
+          KJ_LOG(ERROR, "tryRead", incomingSize);
           return this->inner->tryRead((void*)buffer.begin(), incomingSize, incomingSize);
         });
     };
@@ -76,19 +83,24 @@ class NoiseMessageStreamWrapper {
       this->inner->shutdownWrite();
     }
 
+    void abortRead() {
+      this->inner->abortRead();
+    }
+
   private:
     Own<AsyncIoStream> inner;
 };
 
 class NoiseConnection final: public AsyncIoStream {
   public:
+    ~NoiseConnection() noexcept(false) { KJ_LOG(ERROR, "NoiseConnection dtor"); }
     NoiseConnection(Own<NoiseMessageStreamWrapper> inner, NoiseCipherState* sendState, NoiseCipherState* receiveState) :
       inner(mv(inner)),
       sendState(Own<NoiseCipherState, CipherStateDisposer>(sendState)),
       receiveState(Own<NoiseCipherState, CipherStateDisposer>(receiveState)),
       readPosition(arrayPtr(readBuffer.begin(), readBuffer.begin())) {}
 
-    Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+    Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
       return evalLater([this, buffer, minBytes, maxBytes]() -> Promise<size_t> {
         if (this->readPosition.size() > 0) {
           size_t numBytesToCopy = std::min(maxBytes, this->readPosition.size());
@@ -103,7 +115,10 @@ class NoiseConnection final: public AsyncIoStream {
 
         return this->inner->tryReadMessage(this->readBuffer)
           .then([this, buffer, minBytes, maxBytes](size_t numBytesReceived) {
-            KJ_REQUIRE(numBytesReceived > 0, "EOF");
+            if (numBytesReceived == 0) {
+              KJ_LOG(ERROR, "EOF");
+              return Promise<size_t>((size_t)0);
+            }
 
             NoiseBuffer noiseBuffer;
             noise_buffer_set_inout(noiseBuffer, this->readBuffer.begin(), numBytesReceived, this->readBuffer.size());
@@ -119,7 +134,7 @@ class NoiseConnection final: public AsyncIoStream {
       });
     }
 
-    Promise<void> write(const void* buffer, size_t size) {
+    Promise<void> write(const void* buffer, size_t size) override {
       return evalLater([this, buffer, size]() {
         const size_t macSize = noise_cipherstate_get_mac_length(this->sendState);
         auto noiseBufferBuilder = heapArrayBuilder<byte>(size + macSize);
@@ -140,7 +155,7 @@ class NoiseConnection final: public AsyncIoStream {
       });
     }
 
-    Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) {
+    Promise<void> write(ArrayPtr<const ArrayPtr<const byte>> pieces) override {
       if (pieces.size() > 0) {
         auto piece = pieces[0];
         return this->write(piece.begin(), piece.size())
@@ -152,12 +167,16 @@ class NoiseConnection final: public AsyncIoStream {
       return kj::READY_NOW;
     }
 
-    Promise<void> whenWriteDisconnected() {
+    Promise<void> whenWriteDisconnected() override {
       return this->inner->whenWriteDisconnected();
     }
 
-    void shutdownWrite() {
+    void shutdownWrite() override {
       this->inner->shutdownWrite();
+    }
+
+    void abortRead() override {
+      this->inner->abortRead();
     }
 
   private:

@@ -25,6 +25,8 @@
 #error "RPC APIs, including this header, are not available in lite mode."
 #endif
 
+#include <kj/debug.h>
+
 #include <kj/async.h>
 #include <kj/vector.h>
 #include "raw-schema.h"

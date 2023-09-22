@@ -35,6 +35,7 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
         kj::Own<capnp::AsyncIoMessageStream> msgStream;
         kj::Maybe<kj::Promise<void>> previousWrite;
         MallocMessageBuilder peerVatId;
+        kj::AsyncIoStream& bar;
     };
 
     NoiseVatNetwork(kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM = nullptr);
@@ -45,11 +46,14 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
     kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> connect(rpc::noise::VatId::Reader hostId) override;
     kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> accept() override;
 
+    kj::Promise<void> doFoo();
+
   private:
     kj::Maybe<kj::Own<kj::NetworkAddress>> bindAddressM;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> receiverM;
     kj::Own<kj::PromiseFulfiller<kj::Own<NoiseVatNetworkBase::Connection>>> acceptFulfiller;
     kj::Maybe<kj::Own<kj::AsyncIoStream>> streamM;
+    kj::Maybe<NoiseVatNetwork::Connection&> foo;
 };
 
 } // namespace capnp

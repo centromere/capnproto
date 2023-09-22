@@ -74,6 +74,7 @@ struct Message {
     ACCEPT,
     JOIN,
     DISEMBARGO,
+    GOODBYE,
   };
 
   struct _capnpPrivate {
@@ -489,6 +490,9 @@ public:
   inline bool hasDisembargo() const;
   inline  ::capnp::rpc::Disembargo::Reader getDisembargo() const;
 
+  inline bool isGoodbye() const;
+  inline  ::capnp::Void getGoodbye() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -623,6 +627,10 @@ public:
   inline  ::capnp::rpc::Disembargo::Builder initDisembargo();
   inline void adoptDisembargo(::capnp::Orphan< ::capnp::rpc::Disembargo>&& value);
   inline ::capnp::Orphan< ::capnp::rpc::Disembargo> disownDisembargo();
+
+  inline bool isGoodbye();
+  inline  ::capnp::Void getGoodbye();
+  inline void setGoodbye( ::capnp::Void value = ::capnp::VOID);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -3237,6 +3245,32 @@ inline ::capnp::Orphan< ::capnp::rpc::Disembargo> Message::Builder::disownDisemb
               "Must check which() before get()ing a union member.");
   return ::capnp::_::PointerHelpers< ::capnp::rpc::Disembargo>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool Message::Reader::isGoodbye() const {
+  return which() == Message::GOODBYE;
+}
+inline bool Message::Builder::isGoodbye() {
+  return which() == Message::GOODBYE;
+}
+inline  ::capnp::Void Message::Reader::getGoodbye() const {
+  KJ_IREQUIRE((which() == Message::GOODBYE),
+              "Must check which() before get()ing a union member.");
+  return _reader.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline  ::capnp::Void Message::Builder::getGoodbye() {
+  KJ_IREQUIRE((which() == Message::GOODBYE),
+              "Must check which() before get()ing a union member.");
+  return _builder.getDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Message::Builder::setGoodbye( ::capnp::Void value) {
+  _builder.setDataField<Message::Which>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, Message::GOODBYE);
+  _builder.setDataField< ::capnp::Void>(
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint32_t Bootstrap::Reader::getQuestionId() const {

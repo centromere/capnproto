@@ -2770,8 +2770,7 @@ private:
     return canceler.wrap(connection.get<Connected>()->receiveIncomingMessage()).then(
         [this](kj::Maybe<kj::Own<IncomingRpcMessage>>&& message) {
       KJ_IF_SOME(m, message) {
-        handleMessage(kj::mv(m));
-        return true;
+        return handleMessage(kj::mv(m));
       } else {
         tasks.add(KJ_EXCEPTION(DISCONNECTED, "Peer disconnected."));
         return false;
@@ -2798,12 +2797,15 @@ private:
       //   depth-first way, when it should. If we could fix that then we can probably remove this
       //   `evalLater()`. However, the `evalLater()` is not that bad and solves the problem...
       if (keepGoing) tasks.add(kj::evalLater([this]() { return messageLoop(); }));
+
+      //if (!keepGoing) tasks.add(kj::evalLater([this]() { return connection.get<Connected>()->shutdown(); }));
     });
   }
 
-  void handleMessage(kj::Own<IncomingRpcMessage> message) {
+  bool handleMessage(kj::Own<IncomingRpcMessage> message) {
     auto reader = message->getBody().getAs<rpc::Message>();
 
+    KJ_LOG(ERROR, reader.which());
     switch (reader.which()) {
       case rpc::Message::UNIMPLEMENTED:
         handleUnimplemented(reader.getUnimplemented());
@@ -2812,6 +2814,9 @@ private:
       case rpc::Message::ABORT:
         handleAbort(reader.getAbort());
         break;
+
+      case rpc::Message::GOODBYE:
+        return false;
 
       case rpc::Message::BOOTSTRAP:
         handleBootstrap(kj::mv(message), reader.getBootstrap());
@@ -2827,6 +2832,12 @@ private:
 
       case rpc::Message::FINISH:
         handleFinish(reader.getFinish());
+        tasks.add(kj::evalLater([this]() {
+          auto message = this->connection.get<Connected>()->newOutgoingMessage(4);
+          auto builder = message->getBody().initAs<rpc::Message>();
+          builder.setGoodbye(Void());
+          message->send();
+        }));
         break;
 
       case rpc::Message::RESOLVE:
@@ -2851,6 +2862,8 @@ private:
         break;
       }
     }
+
+    return true;
   }
 
   void handleUnimplemented(const rpc::Message::Reader& message) {

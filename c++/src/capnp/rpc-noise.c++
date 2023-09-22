@@ -56,7 +56,9 @@ NoiseVatNetwork::NoiseVatNetwork(kj::Own<kj::AsyncIoStream> stream) : streamM(kj
 
 kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc::noise::VatId::Reader hostId) {
   KJ_IF_SOME(stream, this->streamM) {
-    return kj::heap<NoiseVatNetwork::Connection>(kj::mv(stream));
+    auto f = kj::heap<NoiseVatNetwork::Connection>(kj::mv(stream));
+    this->foo = f;
+    return f;
   } else {
     kj::throwFatalException(KJ_EXCEPTION(UNIMPLEMENTED, "foo"));
   }
@@ -64,8 +66,10 @@ kj::Maybe<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::connect(rpc
 
 kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() {
   KJ_IF_SOME(receiver, this->receiverM) {
-    return receiver->accept().then([](kj::Own<kj::AsyncIoStream> stream) {
-      return kj::Own<NoiseVatNetworkBase::Connection>(kj::heap<NoiseVatNetwork::Connection>(mv(stream)));
+    return receiver->accept().then([this](kj::Own<kj::AsyncIoStream> stream) {
+      auto f = kj::heap<NoiseVatNetwork::Connection>(mv(stream));
+      this->foo = f;
+      return kj::Own<NoiseVatNetworkBase::Connection>(kj::mv(f));
     });
   } else {
     KJ_IF_SOME(bindAddress, this->bindAddressM) {
@@ -80,10 +84,14 @@ kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() 
   }
 }
 
-NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoStream> stream) : previousWrite(kj::READY_NOW), peerVatId(4) {
+kj::Promise<void> NoiseVatNetwork::doFoo() {
+  return KJ_ASSERT_NONNULL(this->foo, "foo").shutdown();
+}
+
+NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoStream> stream) : bar(*stream), previousWrite(kj::READY_NOW), peerVatId(4) {
   this->msgStream = kj::heap<capnp::AsyncIoMessageStream>(*stream).attach(kj::mv(stream));
 
-  /*auto keyBytes = this->peerVatId.initRoot<rpc::noise::VatId>()
+  auto keyBytes = this->peerVatId.initRoot<rpc::noise::VatId>()
     .initPublicKey()
     .initX25519()
     .initBytes();
@@ -91,7 +99,7 @@ NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoStream> stream) : pre
   keyBytes.setA(65535);
   keyBytes.setB(255);
   keyBytes.setC(65535);
-  keyBytes.setD(254);*/
+  keyBytes.setD(254);
 }
 
 kj::Own<OutgoingRpcMessage> NoiseVatNetwork::Connection::newOutgoingMessage(uint firstSegmentWordSize) {
@@ -99,8 +107,10 @@ kj::Own<OutgoingRpcMessage> NoiseVatNetwork::Connection::newOutgoingMessage(uint
 }
 
 kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection::receiveIncomingMessage() {
+  KJ_LOG(ERROR, "w");
   return this->msgStream->tryReadMessage()
     .then([](auto msgReaderM) {
+      KJ_LOG(ERROR, "q");
       return msgReaderM.map([](kj::Own<capnp::MessageReader>& msgReader) -> kj::Own<IncomingRpcMessage> {
         return kj::heap<IncomingMessageImpl>(kj::mv(msgReader));
       });
@@ -108,9 +118,13 @@ kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection:
 }
 
 kj::Promise<void> NoiseVatNetwork::Connection::shutdown() {
-  this->previousWrite = kj::none;
+  KJ_LOG(ERROR, "FOO");
+  kj::Promise<void> result = KJ_ASSERT_NONNULL(this->previousWrite, "already shut down").then([this]() {
+    return this->msgStream->end();
+  });
 
-  return kj::READY_NOW;
+  this->previousWrite = kj::none;
+  return kj::mv(result);
 }
 
 rpc::noise::VatId::Reader NoiseVatNetwork::Connection::getPeerVatId() {

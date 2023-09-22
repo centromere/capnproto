@@ -239,6 +239,8 @@ struct Message {
     # of a time buffer they want to offer for the client to receive the `abort` before the
     # connection is reset).
 
+    goodbye @14 :Void;
+
     # Level 0 features -----------------------------------------------
 
     bootstrap @8 :Bootstrap;  # Request the peer's bootstrap interface.
