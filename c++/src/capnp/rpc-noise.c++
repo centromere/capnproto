@@ -84,10 +84,6 @@ kj::Promise<kj::Own<NoiseVatNetworkBase::Connection>> NoiseVatNetwork::accept() 
   }
 }
 
-kj::Promise<void> NoiseVatNetwork::doFoo() {
-  return KJ_ASSERT_NONNULL(this->foo, "foo").shutdown();
-}
-
 NoiseVatNetwork::Connection::Connection(kj::Own<kj::AsyncIoStream> stream) : bar(*stream), previousWrite(kj::READY_NOW), peerVatId(4) {
   this->msgStream = kj::heap<capnp::AsyncIoMessageStream>(*stream).attach(kj::mv(stream));
 

@@ -2816,6 +2816,18 @@ private:
         break;
 
       case rpc::Message::GOODBYE:
+        KJ_LOG(ERROR, "RECEIVED GOODBYE", this->connection.is<Connected>());
+        if (this->connection.is<Connected>()) {
+          tasks.add(kj::evalLater([this]() {
+            auto message = this->connection.get<Connected>()->newOutgoingMessage(4);
+            auto builder = message->getBody().initAs<rpc::Message>();
+            builder.setGoodbye(Void());
+            message->send();
+            KJ_LOG(ERROR, "SENT GOODBYE (A)");
+            this->disconnectFulfiller->fulfill(DisconnectInfo { this->connection.get<Connected>()->shutdown() });
+          }));
+        } else {
+        }
         return false;
 
       case rpc::Message::BOOTSTRAP:
@@ -2832,11 +2844,13 @@ private:
 
       case rpc::Message::FINISH:
         handleFinish(reader.getFinish());
+        KJ_LOG(ERROR, "RECEIVED FINISH");
         tasks.add(kj::evalLater([this]() {
           auto message = this->connection.get<Connected>()->newOutgoingMessage(4);
           auto builder = message->getBody().initAs<rpc::Message>();
           builder.setGoodbye(Void());
           message->send();
+          KJ_LOG(ERROR, "SENT GOODBYE (B)");
         }));
         break;
 
