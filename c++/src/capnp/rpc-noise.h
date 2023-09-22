@@ -21,6 +21,7 @@ class NoiseVatNetwork: public NoiseVatNetworkBase {
     class Connection : public NoiseVatNetworkBase::Connection {
       public:
         Connection(kj::Own<kj::AsyncIoStream> inner);
+        ~Connection() noexcept(false) { KJ_LOG(ERROR, "NoiseVatNetwork::Connection dtor"); }
 
         kj::Own<OutgoingRpcMessage> newOutgoingMessage(uint firstSegmentWordSize) override;
         kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> receiveIncomingMessage() override;

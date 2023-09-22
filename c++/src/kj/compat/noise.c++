@@ -40,6 +40,7 @@ class NoisePeerIdentityImpl final: public NoisePeerIdentity {
 class NoiseMessageStreamWrapper {
   public:
     NoiseMessageStreamWrapper(Own<AsyncIoStream> inner) : inner(mv(inner)) {}
+    ~NoiseMessageStreamWrapper() noexcept(false) { KJ_LOG(ERROR, "NoiseMessageStreamWrapper dtor"); }
 
     Promise<size_t> tryReadMessage(ArrayPtr<byte> buffer) {
       KJ_REQUIRE(buffer.size() >= 2, "unable to read: provided buffer is too small");
@@ -197,6 +198,7 @@ class NoiseConnection final: public AsyncIoStream {
 class NoiseHandshake {
   public:
     NoiseHandshake(NoiseContext& noise) : noise(noise) {}
+    ~NoiseHandshake() noexcept(false) { KJ_LOG(ERROR, "NoiseHandshake dtor"); }
 
     Promise<Own<NoiseConnection>> run(Own<NoiseMessageStreamWrapper> stream) {
       int err;
@@ -293,6 +295,7 @@ class NoiseHandshake {
 class NoiseNetworkAddress final: public NetworkAddress {
   public:
     NoiseNetworkAddress(NoiseContext& noise, Own<NetworkAddress> inner, const Maybe<const NoisePeerIdentity&> peerIdentityM = kj::none) : noise(noise), inner(mv(inner)), peerIdentityM(peerIdentityM) {}
+    ~NoiseNetworkAddress() noexcept(false) { KJ_LOG(ERROR, "NoiseNetworkAddress dtor"); }
 
     String toString() override {
       return str("noise:", this->inner->toString());
@@ -324,6 +327,7 @@ class NoiseNetworkAddress final: public NetworkAddress {
 class NoiseNetwork final: public Network {
   public:
     NoiseNetwork(NoiseContext& noise, Network& inner) : noise(noise), inner(inner) {}
+    ~NoiseNetwork() noexcept(false) { KJ_LOG(ERROR, "NoiseNetwork dtor"); }
 
     Promise<Own<NetworkAddress>> parseAddress(StringPtr addr, uint portHint = 0) override {
       // noise://WJ3FXzLmo0K9fRXm7UPi+dbesQW8q5bsmbz3fpKHpXM=@[::1]:3000
@@ -351,6 +355,7 @@ class NoiseNetwork final: public Network {
 class NoiseConnectionReceiver final: public ConnectionReceiver {
   public:
     NoiseConnectionReceiver(NoiseContext& noise, Own<ConnectionReceiver> inner) : noise(noise), inner(mv(inner)) {}
+    ~NoiseConnectionReceiver() noexcept(false) { KJ_LOG(ERROR, "NoiseConnectionReceiver dtor"); }
 
     Promise<Own<AsyncIoStream>> accept() override {
       return this->inner->accept()

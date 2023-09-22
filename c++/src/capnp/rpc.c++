@@ -339,6 +339,7 @@ public:
     // Task which is working on sending an abort message and cleanly ending the connection.
   };
 
+  ~RpcConnectionState() noexcept(false) { KJ_LOG(ERROR, "RpcConnectionState dtor"); }
   RpcConnectionState(BootstrapFactoryBase& bootstrapFactory,
                      kj::Maybe<SturdyRefRestorerBase&> restorer,
                      kj::Own<VatNetworkBase::Connection>&& connectionParam,
@@ -2802,6 +2803,8 @@ private:
     });
   }
 
+  bool foo = false;
+
   bool handleMessage(kj::Own<IncomingRpcMessage> message) {
     auto reader = message->getBody().getAs<rpc::Message>();
 
@@ -2816,18 +2819,24 @@ private:
         break;
 
       case rpc::Message::GOODBYE:
-        KJ_LOG(ERROR, "RECEIVED GOODBYE", this->connection.is<Connected>());
-        if (this->connection.is<Connected>()) {
+        KJ_LOG(ERROR, "RECEIVED GOODBYE", this->foo);
+        if (!this->foo) {
           tasks.add(kj::evalLater([this]() {
             auto message = this->connection.get<Connected>()->newOutgoingMessage(4);
             auto builder = message->getBody().initAs<rpc::Message>();
             builder.setGoodbye(Void());
             message->send();
             KJ_LOG(ERROR, "SENT GOODBYE (A)");
-            this->disconnectFulfiller->fulfill(DisconnectInfo { this->connection.get<Connected>()->shutdown() });
+          }).then([this]() {
+            this->foo = true;
+            return this->connection.get<Connected>()->shutdown();
+          }).then([this]() {
+            this->disconnectFulfiller->fulfill(DisconnectInfo { kj::READY_NOW });
           }));
         } else {
+          this->disconnectFulfiller->fulfill(DisconnectInfo { kj::READY_NOW });
         }
+
         return false;
 
       case rpc::Message::BOOTSTRAP:
@@ -2851,6 +2860,9 @@ private:
           builder.setGoodbye(Void());
           message->send();
           KJ_LOG(ERROR, "SENT GOODBYE (B)");
+        }).then([this]() {
+          this->foo = true;
+          return this->connection.get<Connected>()->shutdown();
         }));
         break;
 
