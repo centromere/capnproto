@@ -220,10 +220,12 @@ public:
   T& next(Id& id) {
     if (freeIds.empty()) {
       id = slots.size();
+      KJ_LOG(ERROR, "ExportTable::next", id);
       KJ_ASSERT(!isHigh(id), "2^31 concurrent questions?!!?!");
       return slots.add();
     } else {
       id = freeIds.top();
+      KJ_LOG(ERROR, "ExportTable::next", id);
       freeIds.pop();
       return slots[id];
     }
@@ -281,6 +283,8 @@ class ImportTable {
 
 public:
   T& operator[](Id id) {
+    KJ_LOG(ERROR, "ImportTable::[]", id);
+
     if (id < kj::size(low)) {
       return low[id];
     } else {
@@ -302,6 +306,7 @@ public:
   }
 
   T erase(Id id) {
+    KJ_LOG(ERROR, "ImportTable::erase", id);
     // Remove an entry from the table and return it.  We return it so that the caller can be
     // careful to release it (possibly invoking arbitrary destructors) at a time that makes sense.
     if (id < kj::size(low)) {
@@ -379,6 +384,7 @@ public:
       builder.getDeprecatedObjectId().set(objectId);
 
       message->send();
+      KJ_LOG(ERROR, "SENT BOOTSTRAP", questionId);
     }
 
     auto pipeline = kj::refcounted<RpcPipeline>(*this, kj::mv(questionRef), kj::mv(paf.promise));
@@ -949,6 +955,7 @@ private:
     }
 
     kj::Promise<void> shutdown() override {
+      KJ_LOG(ERROR, "RpcClient::shutdown");
       return this->connectionState->disconnectGracefully();
     }
 
@@ -985,6 +992,7 @@ private:
           builder.setId(importId);
           builder.setReferenceCount(remoteRefcount);
           message->send();
+          KJ_LOG(ERROR, "SENT RELEASE", importId);
         }
       });
     }
@@ -1685,7 +1693,7 @@ private:
     }
 
     kj::Promise<void> shutdown() override {
-      KJ_LOG(ERROR, "Tribble");
+      KJ_LOG(ERROR, "Tribble::shutdown");
       return kj::READY_NOW;
     }
 
@@ -1803,6 +1811,7 @@ private:
             builder.setRequireEarlyCancellationWorkaround(false);
 
             message->send();
+            KJ_LOG(ERROR, "SENT FINISH", id);
           })) {
             connectionState->tasks.add(kj::mv(e));
           }
@@ -1862,6 +1871,8 @@ private:
                   sizeInWords<rpc::Payload>() + MESSAGE_TARGET_SIZE_HINT))),
           callBuilder(message->getBody().getAs<rpc::Message>().initCall()),
           paramsBuilder(capTable.imbue(callBuilder.getParams().getContent())) {}
+
+    ~RpcRequest() { KJ_LOG(ERROR, "RpcRequest dtor"); }
 
     inline AnyPointer::Builder getRoot() {
       return paramsBuilder;
@@ -2077,6 +2088,7 @@ private:
         KJ_CONTEXT("sending RPC call",
            callBuilder.getInterfaceId(), callBuilder.getMethodId());
         message->send();
+        KJ_LOG(ERROR, "SENT CALL", callBuilder.getInterfaceId(), callBuilder.getMethodId(), result.questionId);
       })) {
         // We can't safely throw the exception from here since we've already modified the question
         // table state. We'll have to reject the promise instead.
@@ -2162,6 +2174,7 @@ private:
       KJ_CONTEXT("sending RPC call",
           callBuilder.getInterfaceId(), callBuilder.getMethodId());
       message->send();
+      KJ_LOG(ERROR, "SENT CALL", callBuilder.getInterfaceId(), callBuilder.getMethodId());
 
       return kj::mv(questionRef);
     }
@@ -2546,6 +2559,7 @@ private:
             }
 
             message->send();
+            KJ_LOG(ERROR, "SENT RETURN", answerId, builder.getNoFinishNeeded());
           }
 
           cleanupAnswerTable(nullptr, shouldFreePipeline);
@@ -2583,8 +2597,9 @@ private:
         auto& responseImpl = kj::downcast<RpcServerResponseImpl>(*KJ_ASSERT_NONNULL(response));
         if (!responseImpl.hasCapabilities()) {
           returnMessage.setNoFinishNeeded(true);
+          KJ_LOG(ERROR, "NO FINISH NEEDED");
 
-          // Tell ourselves that a finsih was already received, so that `cleanupAnswerTable()`
+          // Tell ourselves that a finish was already received, so that `cleanupAnswerTable()`
           // removes the answer table entry.
           receivedFinish = true;
 
@@ -2646,6 +2661,7 @@ private:
           // important.)
 
           message->send();
+          KJ_LOG(ERROR, "SENT RETURN", answerId);
         }
 
         // Do not allow releasing the pipeline because we want pipelined calls to propagate the
@@ -2671,6 +2687,7 @@ private:
         //   don't want to fully think through the implications right now.
 
         message->send();
+        KJ_LOG(ERROR, "SENT REDIRECT RETURN", answerId);
 
         cleanupAnswerTable(nullptr, false);
       }
@@ -2749,6 +2766,7 @@ private:
               builder.setTakeFromOtherQuestion(tailInfo.questionId);
 
               message->send();
+              KJ_LOG(ERROR, "SENT RETURN", answerId);
             }
 
             // There are no caps in our return message, but of course the tail results could have
@@ -2989,6 +3007,8 @@ private:
       }
     }
 
+    KJ_LOG(ERROR, "handled message");
+
     return true;
   }
 
@@ -3130,6 +3150,7 @@ private:
     answer.pipeline = kj::Own<PipelineHook>(kj::refcounted<SingleCapPipeline>(kj::mv(capHook)));
 
     response->send();
+    KJ_LOG(ERROR, "SENT BOOTSTRAP RESPONSE", answerId);
   }
 
   void handleCall(kj::Own<IncomingRpcMessage>&& message, const rpc::Call::Reader& call) {
@@ -3742,7 +3763,7 @@ public:
   kj::Promise<void> run() { return kj::mv(acceptLoopPromise); }
 
   kj::Promise<void> shutdown() {
-    KJ_LOG(ERROR, "RpcSystemBase::Impl::shutdown()", this->connections.size());
+    KJ_LOG(ERROR, "RpcSystemBase::Impl::shutdown", this->connections.size());
     for (auto& c: this->connections) {
       KJ_LOG(ERROR, "disconnecting connection gracefully");
       this->tasks.add(c.second->disconnectGracefully());

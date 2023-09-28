@@ -851,7 +851,7 @@ public:
 
   static kj::Own<ClientHook> from(Capability::Client client) { return kj::mv(client.hook); }
 
-  virtual kj::Promise<void> shutdown() = 0;
+  virtual kj::Promise<void> shutdown() { KJ_LOG(ERROR, "ClientHook::shutdown (virtual)"); return kj::READY_NOW; };
 };
 
 class RevocableClientHook: public ClientHook {

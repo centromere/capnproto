@@ -83,6 +83,7 @@ kj::Promise<kj::Maybe<int>> Capability::Client::getFd() {
 }
 
 void Capability::Client::shutdown() {
+  KJ_LOG(ERROR, "Capability::Client::shutdown", this->hook);
   this->hook->shutdown();
 }
 
@@ -477,6 +478,7 @@ public:
   }
 
   kj::Promise<void> shutdown() override {
+    KJ_LOG(ERROR, "QueuedClient::shutdown");
     return kj::READY_NOW;
   }
 
@@ -745,7 +747,7 @@ public:
   }
 
   kj::Promise<void> shutdown() override {
-    KJ_LOG(ERROR, "LocalClient");
+    KJ_LOG(ERROR, "LocalClient::shutdown");
     return kj::READY_NOW;
   }
 
@@ -1056,7 +1058,7 @@ public:
   }
 
   kj::Promise<void> shutdown() override {
-    KJ_LOG(ERROR, "BrokenClient");
+    KJ_LOG(ERROR, "BrokenClient::shutdown");
     return kj::READY_NOW;
   }
 
