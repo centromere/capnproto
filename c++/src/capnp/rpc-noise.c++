@@ -21,6 +21,7 @@ class NoiseVatNetwork::Connection::OutgoingMessageImpl final : public OutgoingRp
       auto& previousWrite = KJ_ASSERT_NONNULL(this->conn.previousWrite, "connection already shut down");
       this->conn.previousWrite = previousWrite
         .then([this]() {
+          KJ_LOG(ERROR, "writeMessage");
           return this->conn.msgStream->writeMessage(this->message);
         }).attach(kj::addRef(*this));
     }
@@ -103,19 +104,20 @@ kj::Own<OutgoingRpcMessage> NoiseVatNetwork::Connection::newOutgoingMessage(uint
 }
 
 kj::Promise<kj::Maybe<kj::Own<IncomingRpcMessage>>> NoiseVatNetwork::Connection::receiveIncomingMessage() {
-  KJ_LOG(ERROR, "w");
+  KJ_LOG(ERROR, "NoiseVatNetwork::Connection::receiveIncomingMessage");
   return this->msgStream->tryReadMessage()
     .then([](auto msgReaderM) {
-      KJ_LOG(ERROR, "q");
       return msgReaderM.map([](kj::Own<capnp::MessageReader>& msgReader) -> kj::Own<IncomingRpcMessage> {
+        KJ_LOG(ERROR, "message received");
         return kj::heap<IncomingMessageImpl>(kj::mv(msgReader));
       });
     });
 }
 
 kj::Promise<void> NoiseVatNetwork::Connection::shutdown() {
-  KJ_LOG(ERROR, "FOO");
+  KJ_LOG(ERROR, "NoiseVatNetwork::Connection::shutdown");
   kj::Promise<void> result = KJ_ASSERT_NONNULL(this->previousWrite, "already shut down").then([this]() {
+    KJ_LOG(ERROR, "msgStream->end()");
     return this->msgStream->end();
   });
 

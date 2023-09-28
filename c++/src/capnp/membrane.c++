@@ -541,6 +541,11 @@ public:
     return kj::none;
   }
 
+  kj::Promise<void> shutdown() override {
+    KJ_LOG(ERROR, "MembraneHook");
+    return kj::READY_NOW;
+  }
+
 private:
   kj::Own<ClientHook> inner;
   kj::Own<MembranePolicy> policy;

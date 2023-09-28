@@ -205,6 +205,7 @@ void END_CANCELER_STACK_START_CANCELEE_STACK() {}
 // traces into one and we use this as a separator.
 
 Canceler::~Canceler() noexcept(false) {
+  KJ_LOG(ERROR, "Canceler dtor", isEmpty());
   if (isEmpty()) return;
   cancel(getDestructionReason(
       reinterpret_cast<void*>(&END_CANCELER_STACK_START_CANCELEE_STACK),

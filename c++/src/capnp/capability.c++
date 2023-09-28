@@ -82,6 +82,10 @@ kj::Promise<kj::Maybe<int>> Capability::Client::getFd() {
   }
 }
 
+void Capability::Client::shutdown() {
+  this->hook->shutdown();
+}
+
 kj::Maybe<kj::Promise<Capability::Client>> Capability::Server::shortenPath() {
   return kj::none;
 }
@@ -472,6 +476,10 @@ public:
     }
   }
 
+  kj::Promise<void> shutdown() override {
+    return kj::READY_NOW;
+  }
+
 private:
   typedef kj::ForkedPromise<kj::Own<ClientHook>> ClientHookPromiseFork;
 
@@ -734,6 +742,11 @@ public:
     } else {
       return kj::none;
     }
+  }
+
+  kj::Promise<void> shutdown() override {
+    KJ_LOG(ERROR, "LocalClient");
+    return kj::READY_NOW;
   }
 
 private:
@@ -1040,6 +1053,11 @@ public:
 
   kj::Maybe<int> getFd() override {
     return kj::none;
+  }
+
+  kj::Promise<void> shutdown() override {
+    KJ_LOG(ERROR, "BrokenClient");
+    return kj::READY_NOW;
   }
 
 private:

@@ -202,6 +202,10 @@ public:
   // `nullptr`.  The resulting client is not meant to be called and throws exceptions from all
   // methods.
 
+  ~Client() {
+    KJ_LOG(ERROR, "Capability::Client dtor");
+  }
+
   template <typename T, typename = kj::EnableIf<kj::canConvert<T*, Capability::Server*>()>>
   Client(kj::Own<T>&& server);
   // Make a client capability that wraps the given server capability.  The server's methods will
@@ -283,6 +287,8 @@ public:
   // If you need it to last longer, you will need to `dup()` it.
 
   // TODO(someday):  method(s) for Join
+
+  void shutdown();
 
 protected:
   Client() = default;
@@ -844,6 +850,8 @@ public:
   // non-null, then Capability::Client::getFd() waits for resolution and tries again.
 
   static kj::Own<ClientHook> from(Capability::Client client) { return kj::mv(client.hook); }
+
+  virtual kj::Promise<void> shutdown() = 0;
 };
 
 class RevocableClientHook: public ClientHook {

@@ -160,6 +160,11 @@ public:
   // However, if an exception is thrown, the RpcSystem will log the exception to the console and
   // then cease accepting new connections. In this case, your server may be in a broken state, but
   // without restarting. All servers should therefore call run() and handle failures in some way.
+
+  kj::Promise<void> shutdown() { return RpcSystemBase::shutdown(); }
+  // Attempt to gracefully shut down each connection within the system.
+
+  kj::Promise<void> foo() { return RpcSystemBase::foo(); }
 };
 
 template <typename VatId, typename ProvisionId, typename RecipientId,
