@@ -402,6 +402,7 @@ public:
     KJ_DEFER(traceEncoder = nullptr);
 
     if (!this->connection.is<Connected>()) {
+      KJ_LOG(ERROR, "not connected");
       // Already disconnected.
       return kj::READY_NOW;
     }
@@ -413,12 +414,8 @@ public:
       // A goodbye message has already been dispatched to the peer, resource cleanup has already
       // occurred, and our side of the TCP connection has already been shut down. Therefore,
       // the connection state shall be transitioned to `Disconnected`. Note that this will cause
-      // the VatNetworkBase::Connection and Canceler to fall out of scope and be destroyed upon
-      // exiting this function.
+      // the VatNetworkBase::Connection and Canceler to be destroyed upon exiting this scope.
       this->connection.init<Disconnected>(KJ_EXCEPTION(DISCONNECTED, "connection shut down gracefully"));
-
-      // This will cause the entire RpcConnectionState to be destroyed.
-      this->disconnectFulfiller->fulfill(DisconnectInfo { kj::READY_NOW });
 
       return kj::READY_NOW;
     }
@@ -434,7 +431,7 @@ public:
       kj::Vector<kj::Own<ClientHook>> clientsToRelease;
       kj::Vector<decltype(Answer::task)> tasksToRelease;
       kj::Vector<kj::Promise<void>> resolveOpsToRelease;
-      //KJ_DEFER(tasks.clear());
+      KJ_DEFER(tasks.clear());
 
       // All current questions complete with exceptions.
       questions.forEach([&](QuestionId id, Question& question) {
@@ -488,7 +485,7 @@ public:
     })) {
       // Some destructor must have thrown an exception.  There is no appropriate place to report
       // these errors.
-      KJ_LOG(ERROR, "Uncaught exception when destroying capabilities dropped by disconnect.",
+      KJ_LOG(ERROR, "Uncaught exception when destroying capabilities dropped by graceful disconnect.",
              newException);
     }
 
@@ -498,8 +495,6 @@ public:
     message->send();
     KJ_LOG(ERROR, "SENT GOODBYE");
 
-    // Note that the disconnectFulfiller can not be fulfilled at this point, as it would destroy
-    // the underlying socket and prevent us from receiving the peer's reciprocal goodbye.
     return conn.vatConn->shutdown();
   }
 
@@ -2958,7 +2953,12 @@ private:
 
       case rpc::Message::GOODBYE:
         KJ_LOG(ERROR, "RECEIVED GOODBYE");
-        this->tasks.add(disconnectGracefully());
+
+        // This will cause the entire RpcConnectionState to be destroyed.
+        this->disconnectFulfiller->fulfill(DisconnectInfo {
+          kj::evalLater([this]() { return this->disconnectGracefully(); }).attach(kj::addRef(*this))
+        });
+
         return false;
 
       case rpc::Message::BOOTSTRAP:
@@ -3773,17 +3773,6 @@ public:
     return this->tasks.onEmpty();
   }
 
-  kj::Promise<void> foo() {
-    KJ_LOG(ERROR, "A");
-    for (auto& c: this->connections) {
-      KJ_LOG(ERROR, "B");
-      return c.second->disconnectGracefully();
-    }
-
-    KJ_LOG(ERROR, "C");
-    return kj::READY_NOW;
-  }
-
 private:
   VatNetworkBase& network;
   kj::Maybe<Capability::Client> bootstrapInterface;
@@ -3883,11 +3872,6 @@ kj::Promise<void> RpcSystemBase::run() {
 kj::Promise<void> RpcSystemBase::shutdown() {
   KJ_LOG(ERROR, "RpcSystemBase::shutdown");
   return impl->shutdown();
-}
-
-kj::Promise<void> RpcSystemBase::foo() {
-  KJ_LOG(ERROR, "foo");
-  return impl->foo();
 }
 
 }  // namespace _ (private)

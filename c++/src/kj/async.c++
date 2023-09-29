@@ -418,7 +418,6 @@ void TaskSet::destroyTasks() {
   // task to be able to schedule new tasks. So when we cancel our tasks... we might find new
   // tasks added! We'll have to repeatedly cancel. Additionally, we need to make sure that we destroy
   // the items in a loop to prevent any issues with stack overflow.
-
   KJ_DEFER({
     // If an exception occurs, ensure the remaining tasks still get unlinked.  Here, we assume it
     // is not necessary to catch further exceptions, since we require destructors to guard against

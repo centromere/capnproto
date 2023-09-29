@@ -163,8 +163,6 @@ public:
 
   kj::Promise<void> shutdown() { return RpcSystemBase::shutdown(); }
   // Attempt to gracefully shut down each connection within the system.
-
-  kj::Promise<void> foo() { return RpcSystemBase::foo(); }
 };
 
 template <typename VatId, typename ProvisionId, typename RecipientId,

@@ -89,7 +89,6 @@ public:
 
   kj::Promise<void> run();
   kj::Promise<void> shutdown();
-  kj::Promise<void> foo();
 
 private:
   class Impl;
