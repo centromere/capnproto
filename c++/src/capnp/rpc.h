@@ -161,7 +161,7 @@ public:
   // then cease accepting new connections. In this case, your server may be in a broken state, but
   // without restarting. All servers should therefore call run() and handle failures in some way.
 
-  kj::Promise<void> shutdown() { return RpcSystemBase::shutdown(); }
+  kj::Promise<void> shutdown(AnyStruct::Reader vatId) { return RpcSystemBase::shutdown(vatId); }
   // Attempt to gracefully shut down each connection within the system.
 };
 

@@ -397,7 +397,7 @@ public:
     disconnect(kj::mv(exception));
   }
 
-  kj::Promise<void> disconnectGracefully() {
+  /*kj::Promise<void> disconnectGracefully() {
     KJ_LOG(ERROR, "disconnectGracefully");
     KJ_DEFER(traceEncoder = nullptr);
 
@@ -496,7 +496,7 @@ public:
     KJ_LOG(ERROR, "SENT GOODBYE");
 
     return conn.vatConn->shutdown();
-  }
+  }*/
 
   void disconnect(kj::Exception&& exception) {
     KJ_LOG(ERROR, "disconnect");
@@ -786,7 +786,7 @@ private:
 
   typedef struct {
     kj::Own<VatNetworkBase::Connection> vatConn;
-    bool shuttingDown;
+    bool keepGoing;
     kj::Canceler canceler;
     // Will be canceled if `connection` is changed from `Connected` to `Disconnected`.
   } Connected;
@@ -947,11 +947,6 @@ private:
     }
     const void* getBrand() override {
       return connectionState.get();
-    }
-
-    kj::Promise<void> shutdown() override {
-      KJ_LOG(ERROR, "RpcClient::shutdown");
-      return this->connectionState->disconnectGracefully();
     }
 
     kj::Own<RpcConnectionState> connectionState;
@@ -2907,7 +2902,8 @@ private:
     return canceler.wrap(vatConn->receiveIncomingMessage()).then(
         [this](kj::Maybe<kj::Own<IncomingRpcMessage>>&& message) {
       KJ_IF_SOME(m, message) {
-        return handleMessage(kj::mv(m));
+        handleMessage(kj::mv(m));
+        return this->connection.get<Connected>().keepGoing;
       } else {
         tasks.add(KJ_EXCEPTION(DISCONNECTED, "Peer disconnected."));
         return false;
@@ -2950,16 +2946,6 @@ private:
         KJ_LOG(ERROR, "RECEIVED ABORT");
         handleAbort(reader.getAbort());
         break;
-
-      case rpc::Message::GOODBYE:
-        KJ_LOG(ERROR, "RECEIVED GOODBYE");
-
-        // This will cause the entire RpcConnectionState to be destroyed.
-        this->disconnectFulfiller->fulfill(DisconnectInfo {
-          kj::evalLater([this]() { return this->disconnectGracefully(); }).attach(kj::addRef(*this))
-        });
-
-        return false;
 
       case rpc::Message::BOOTSTRAP:
         KJ_LOG(ERROR, "RECEIVED BOOTSTRAP");
@@ -3762,11 +3748,13 @@ public:
 
   kj::Promise<void> run() { return kj::mv(acceptLoopPromise); }
 
-  kj::Promise<void> shutdown() {
+  kj::Promise<void> shutdown(AnyStruct::Reader vatId) {
     KJ_LOG(ERROR, "RpcSystemBase::Impl::shutdown", this->connections.size());
     for (auto& c: this->connections) {
-      KJ_LOG(ERROR, "disconnecting connection gracefully");
-      this->tasks.add(c.second->disconnectGracefully());
+      if (c.first->baseGetPeerVatId() == vatId) {
+        KJ_LOG(ERROR, "vat network connection found -- shutting it down");
+        //
+      }
     }
 
     KJ_LOG(ERROR, "done disconnecting connections gracefully");
@@ -3869,9 +3857,9 @@ kj::Promise<void> RpcSystemBase::run() {
   return impl->run();
 }
 
-kj::Promise<void> RpcSystemBase::shutdown() {
+kj::Promise<void> RpcSystemBase::shutdown(AnyStruct::Reader vatId) {
   KJ_LOG(ERROR, "RpcSystemBase::shutdown");
-  return impl->shutdown();
+  return impl->shutdown(vatId);
 }
 
 }  // namespace _ (private)

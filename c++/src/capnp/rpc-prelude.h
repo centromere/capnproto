@@ -88,7 +88,7 @@ public:
   void setTraceEncoder(kj::Function<kj::String(const kj::Exception&)> func);
 
   kj::Promise<void> run();
-  kj::Promise<void> shutdown();
+  kj::Promise<void> shutdown(AnyStruct::Reader vatId);
 
 private:
   class Impl;
